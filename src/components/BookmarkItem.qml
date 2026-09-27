@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import qs.Commons
 import qs.Ui
-import "BookmarkModel.js" as Model
+import "../BookmarkModel.js" as Model
 
 // One bookmark row. The list delegate supplies the data roles; this component
 // owns only how a row looks and which hover actions it exposes.

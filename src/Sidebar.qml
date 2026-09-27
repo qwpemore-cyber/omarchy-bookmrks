@@ -6,8 +6,7 @@ import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
 import "BookmarkModel.js" as Model
-import "BookmarkItem.qml" as BookmarkItem
-import "AddBookmarkModal.qml" as AddBookmarkModal
+import "components" as Components
 
 // Bookmarks Bar — a left-edge launcher panel for the Omarchy shell.
 //
@@ -384,7 +383,7 @@ Item {
           boundsBehavior: Flickable.StopAtBounds
           maximumFlickVelocity: 1200
 
-          delegate: BookmarkItem {
+          delegate: Components.BookmarkItem {
             required property int index
             required property string entryId
             required property string type
@@ -446,7 +445,7 @@ Item {
       }
     }
 
-    AddBookmarkModal {
+    Components.AddBookmarkModal {
       id: modal
       anchors.fill: parent
       onSubmitted: function(index, payloadJson) {

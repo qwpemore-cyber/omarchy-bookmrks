@@ -3,7 +3,7 @@ import QtQuick.Layouts
 import Quickshell
 import qs.Commons
 import qs.Ui
-import "BookmarkModel.js" as Model
+import "../BookmarkModel.js" as Model
 
 // Add / edit form for a single bookmark. Drawn as a full-surface scrim so it
 // owns every click while it is open — a list row behind a half-transparent
