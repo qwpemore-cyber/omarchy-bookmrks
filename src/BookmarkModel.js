@@ -230,6 +230,42 @@ function removeAt(state, index) {
   return list
 }
 
+// A substring test over the label and the target, lowercased on both sides.
+// Matching the target as well as the label is what makes the box useful for
+// files and commands: a bookmark labelled "Quarterly" is findable by "notes.md"
+// or by "python3", and the person searching usually remembers the target, not
+// the name they gave it. Kept as a substring rather than a fuzzy subsequence
+// because a fuzzy match that reorders results makes the first hit wrong.
+function matches(entry, query) {
+  var needle = String(query === undefined || query === null ? "" : query).trim().toLowerCase()
+  if (needle === "") return true
+  var normalized = normalizeEntry(entry)
+  if (!normalized) return false
+  return normalized.label.toLowerCase().indexOf(needle) !== -1
+    || normalized.target.toLowerCase().indexOf(needle) !== -1
+}
+
+// Returns indexes rather than entries: the panel filters a view it navigates by
+// index, and handing it positions keeps one number meaning the same thing in
+// both the full list and the filtered one.
+function filterIndexes(state, query) {
+  var list = fromObject(state).bookmarks
+  var needle = String(query === undefined || query === null ? "" : query).trim()
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    if (matches(list[i], needle)) out.push(i)
+  }
+  return out
+}
+
+function filterEntries(state, query) {
+  var list = fromObject(state).bookmarks
+  var indexes = filterIndexes(state, query)
+  var out = []
+  for (var i = 0; i < indexes.length; i++) out.push(list[indexes[i]])
+  return out
+}
+
 function moveBy(state, from, delta) {
   var list = fromObject(state).bookmarks.slice()
   var to = from + delta

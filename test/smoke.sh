@@ -903,6 +903,117 @@ else
   done
 fi
 
+# A search box that renumbers its own rows would turn "edit this" and "delete
+# this" into acts on the wrong bookmark, so the panel is checked for keeping the
+# saved list and the shown list apart: a filter hides rows without hiding them
+# from the file, and every action aimed at a visible row still means that row.
+head_ "the filter hides rows without touching the file"
+cat > "$WORK/shell.qml" <<'QML'
+import QtQuick
+import "BookmarkModel.js" as Model
+
+Item {
+  id: harness
+  width: 340
+  height: 600
+
+  property var allEntries: []
+  property string filterQuery: ""
+
+  // The panel's own view mechanics, restated: the truth, the map, and the view.
+  function fullRowFor(viewRow) {
+    if (viewRow < 0) return -1
+    var indexes = Model.filterIndexes({ version: 1, bookmarks: allEntries }, filterQuery)
+    return viewRow < indexes.length ? indexes[viewRow] : -1
+  }
+  function view() { return Model.filterEntries({ version: 1, bookmarks: allEntries }, filterQuery) }
+
+  property var lib: [
+    { id: "a", type: "url",  label: "GitHub",     target: "https://github.com",      icon: "" },
+    { id: "b", type: "file", label: "report",     target: "/tmp/My Notes/report.md",  icon: "" },
+    { id: "c", type: "cmd",  label: "Screenshot", target: "omarchy-capture-screenshot", icon: "" },
+    { id: "d", type: "app",  label: "Files",      target: "org.gnome.Nautilus",        icon: "" }
+  ]
+
+  Component.onCompleted: {
+    var out = []
+    allEntries = lib
+
+    out.push("startsUnfiltered=" + (view().length === 4))
+    filterQuery = "zzzz"
+    out.push("noMatchShowsNothing=" + (view().length === 0))
+    out.push("noMatchStillSavesEverything=" + (allEntries.length === 4))
+    filterQuery = ""
+
+    filterQuery = "e"
+    var shown = view()
+    out.push("filterShowsThree=" + (shown.length === 3))
+    out.push("fileIsStillSaved=" + (allEntries.length === 4))
+
+    // Every visible row must still address the right saved entry.
+    out.push("row0IsStillReport=" + (shown[0].id === "b" && fullRowFor(0) === 1))
+    out.push("row1IsStillScreenshot=" + (shown[1].id === "c" && fullRowFor(1) === 2))
+    out.push("row2IsStillFiles=" + (shown[2].id === "d" && fullRowFor(2) === 3))
+    out.push("pastTheEndIsMinusOne=" + (fullRowFor(3) === -1))
+
+    // Each action starts from the same list, so one of them cannot be what made
+    // the next one pass.
+    var list = { version: 1, bookmarks: lib }
+
+    var deleted = Model.removeAt(list, fullRowFor(0))
+    out.push("deleteTookTheShownOne=" + (deleted.length === 3 && deleted[0].id === "a"
+                                         && deleted[1].id === "c" && deleted[2].id === "d"))
+    out.push("deleteLeftGitHubAlone=" + (deleted.filter(function (e) { return e.id === "a" }).length === 1))
+
+    var edited = Model.updateAt(list, fullRowFor(0), {
+      id: "ignored", type: "cmd", label: "Renamed", target: "true", icon: ""
+    })
+    out.push("editHitTheShownRow=" + (edited[1].label === "Renamed"))
+    // The row keeps the identity the file already gave it, so an edit does not
+    // orphan the row it is editing.
+    out.push("editKeptTheRowsId=" + (edited[1].id === "b"))
+    out.push("editDidNotTouchRow0=" + (edited[0].id === "a" && edited[0].label === "GitHub"))
+
+    // Row 0 on screen is "report", which is row 1 in the file, so moving it down
+    // swaps it past its next saved neighbour and not past whatever happened to
+    // be second on screen.
+    var moved = Model.moveBy(list, fullRowFor(0), 1)
+    out.push("moveSwappedWithItsNeighbour=" + (moved[0].id === "a" && moved[1].id === "c"
+                                               && moved[2].id === "b" && moved[3].id === "d"))
+
+    // Adding under a query: the new row may not be visible at all, and that must
+    // not be mistaken for a failure to add.
+    // Neither word below contains the letter the query is looking for, so the
+    // new row is genuinely saved and genuinely not on screen.
+    var added = Model.append(list, { type: "cmd", label: "zzz", target: "pwd", icon: "" })
+    out.push("addStillSaved=" + (added.length === 5))
+    var afterAdd = Model.filterEntries({ version: 1, bookmarks: added }, "e")
+    out.push("addHiddenByItsOwnQuery=" + (afterAdd.length === 3))
+    out.push("addIsNotInTheView=" + (afterAdd.filter(function (e) { return e.id === added[4].id }).length === 0))
+
+    out.push("emptyQueryMatchesEverythingAgain=" + (Model.filterEntries({ version: 1, bookmarks: added }, "").length === 5))
+
+    console.log("FILTER " + out.join(" "))
+    Qt.callLater(Qt.quit)
+  }
+}
+QML
+
+out="$(run_scene)"
+results="$(printf '%s' "$out" | sed -n 's/.*FILTER //p')"
+if [[ -z "$results" ]]; then
+  bad "the filter harness reported nothing"
+  printf '%s\n' "$out" | grep -vE "$noise" | tail -8
+else
+  for pair in $results; do
+    case "$pair" in
+      *=true)  pass "${pair%%=*}" ;;
+      *=false) bad "${pair%%=*}" ;;
+      *)       bad "unreadable result: $pair" ;;
+    esac
+  done
+fi
+
 # A picked path and a typed one are the same field, and the pickers must not
 # appear for types that have nothing to pick.
 #

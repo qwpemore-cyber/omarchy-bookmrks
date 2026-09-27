@@ -96,19 +96,51 @@ Item {
 
   ListModel { id: listModel }
 
+  // The saved list and the displayed list are two different things, and keeping
+  // them in one ListModel is what makes a search box wrong: a filter that hides
+  // rows would renumber the ones that are left, so "edit this" and "delete this"
+  // would act on the wrong bookmark the moment anything was filtered out. So
+  // allEntries is the truth the file is written from, and listModel is only what
+  // the view is currently showing.
+  property var allEntries: []
+  property string filterQuery: ""
+
   function entryAt(row) {
     if (row < 0 || row >= listModel.count) return null
     var role = listModel.get(row)
     return { id: role.entryId, type: role.type, label: role.label, target: role.target, icon: role.icon }
   }
 
-  function bookmarkList() {
-    var out = []
-    for (var i = 0; i < listModel.count; i++) {
-      var role = listModel.get(i)
-      out.push({ id: role.entryId, type: role.type, label: role.label, target: role.target, icon: role.icon })
-    }
-    return out
+  // The full list, not what is on screen: everything that is written to disk or
+  // handed to the model starts from this, so a search can never quietly become a
+  // deletion.
+  function bookmarkList() { return allEntries }
+
+  // A row on screen is a position in the filtered list; every edit, delete and
+  // reorder has to be addressed in the full one. filterIndexes() is the map, and
+  // it is the same function the view was built from, so the two cannot disagree
+  // about which row is which.
+  function fullRowFor(viewRow) {
+    if (viewRow < 0) return -1
+    var indexes = Model.filterIndexes({ version: 1, bookmarks: allEntries }, filterQuery)
+    return viewRow < indexes.length ? indexes[viewRow] : -1
+  }
+
+  function setFilter(query) {
+    var next = String(query === undefined || query === null ? "" : query)
+    if (next === filterQuery) return
+    filterQuery = next
+    rebuildView()
+    // A search that hides the selected row would otherwise leave the cursor
+    // pointing at whatever slid into that place, so it starts at the top.
+    selectedIndex = listModel.count === 0 ? -1 : 0
+  }
+
+  function clearFilter() {
+    if (filterQuery === "") return
+    filterQuery = ""
+    rebuildView()
+    selectedIndex = listModel.count === 0 ? -1 : 0
   }
 
   function loadBookmarks(rawText) {
@@ -118,10 +150,18 @@ Item {
     rebuild(Model.parse(rawText).bookmarks)
   }
 
+  // Every load and every mutation ends here. The list arriving is always the
+  // whole saved list; what the view shows is decided afterwards.
   function rebuild(list) {
+    allEntries = list
+    rebuildView()
+  }
+
+  function rebuildView() {
+    var visible = Model.filterEntries({ version: 1, bookmarks: allEntries }, filterQuery)
     listModel.clear()
-    for (var i = 0; i < list.length; i++) {
-      var entry = list[i]
+    for (var i = 0; i < visible.length; i++) {
+      var entry = visible[i]
       listModel.append({
         entryId: entry.id,
         type: entry.type,
@@ -147,12 +187,19 @@ Item {
     if (next.length === list.length) return false
     persist(next)
     rebuild(next)
-    selectedIndex = listModel.count - 1
+    // The new row is last in the saved list, but with a query active it may not
+    // be on screen at all, in which case the cursor belongs on what is showing.
+    if (Model.filterEntries({ version: 1, bookmarks: next }, filterQuery).length !== next.length) {
+      selectedIndex = listModel.count === 0 ? -1 : Util.clamp(selectedIndex, 0, listModel.count - 1)
+    } else {
+      selectedIndex = listModel.count - 1
+    }
     return true
   }
 
   function updateEntry(row, payload) {
     if (row < 0 || row >= listModel.count) return false
+    row = fullRowFor(row)
     // A partial payload cannot be normalised, and updateAt would hand the row
     // straight back. Saying "ok" to a caller whose edit vanished is worse than
     // refusing, so the rejection is reported instead of swallowed.
@@ -167,6 +214,8 @@ Item {
 
   function removeEntry(row) {
     if (row < 0 || row >= listModel.count) return false
+    row = fullRowFor(row)
+    if (row < 0) return false
     var list = Model.removeAt({ version: 1, bookmarks: bookmarkList() }, row)
     persist(list)
     rebuild(list)
@@ -176,6 +225,11 @@ Item {
 
   function moveEntry(row, delta) {
     if (row < 0 || row >= listModel.count) return false
+    // Reordering while a query is up moves the entry within the full list, which
+    // is the only order that is actually saved; the filtered view re-derives
+    // itself afterwards and may not even show the row that moved.
+    row = fullRowFor(row)
+    if (row < 0) return false
     var list = Model.moveBy({ version: 1, bookmarks: bookmarkList() }, row, delta)
     if (JSON.stringify(list) === JSON.stringify(bookmarkList())) return false
     persist(list)
@@ -428,6 +482,9 @@ Item {
     mask: Region { item: card }
 
     onOpenedChanged: {
+    // A filter left over from the last time would hide rows before the user
+    // asked to see any, and would then filter what they just added.
+    if (opened && root.filterQuery !== "") { root.clearFilter(); filterField.text = "" }
       // This pre-selects the first row so the list is already driven once the
       // keyboard arrives. It does not take the keyboard: with OnDemand focus
       // the compositor decides that, and until it does the panel is a
@@ -449,8 +506,10 @@ Item {
       PanelKeyCatcher {
         id: keys
         anchors.fill: parent
-        // An open form owns the keyboard.
-        blocked: modal.opened
+        // An open form owns the keyboard, and so does the search field: j and k
+        // are letters, and while somebody is typing a query they must land in
+        // the field rather than moving the cursor through rows they cannot see.
+        blocked: modal.opened || settings.opened || filterField.activeFocus
         onMoveRequested: function(dx, dy) {
           if (root.overlayOpen) return
           root.moveCursor(dy)
@@ -458,8 +517,13 @@ Item {
         }
         onActivateRequested: root.activateCursor()
         // The sheet that is open gets Escape; only a bare panel closes.
+        // Escape applies to the topmost layer, so a sheet goes before a query
+        // and the panel is the last thing to go. A query is cleared here for the
+        // case where the field does not hold focus, since a focused field takes
+        // its own Escape and the catcher never sees one.
         onCloseRequested: modal.opened ? modal.cancel()
           : settings.opened ? settings.cancel()
+          : root.filterQuery !== "" ? (root.clearFilter(), filterField.text = "")
           : root.close()
         onDeleteRequested: function() {
           if (root.overlayOpen) return
@@ -510,7 +574,12 @@ Item {
 
           Text {
             Layout.fillWidth: true
-            text: root.empty ? "" : listModel.count + (listModel.count === 1 ? " item" : " items")
+            // With a query up, "1 item" would be a lie about how much is
+            // hidden, and a count that changes under the cursor is the only
+            // feedback a search gives.
+            text: root.empty ? ""
+              : root.filterQuery === "" ? (listModel.count + (listModel.count === 1 ? " item" : " items"))
+              : (listModel.count + " of " + root.allEntries.length)
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
             color: Util.alpha(Color.popups.text, 0.45)
@@ -541,6 +610,25 @@ Item {
         }
 
         PanelSeparator { Layout.fillWidth: true }
+
+        // The search box. It sits above the list rather than in the header row
+        // because it is a control with a hit area, not a label, and 300px wide
+        // is not enough room for a header, a count, two buttons and a field.
+        TextField {
+          id: filterField
+          objectName: "filterField"
+          Layout.fillWidth: true
+          Layout.margins: Style.space(3)
+          placeholderText: "Filter by name or target"
+          // Nothing is filtered on a fresh panel: a query left over from last
+          // time would hide rows before the user asked to see any.
+          text: root.filterQuery
+          onTextChanged: root.setFilter(text)
+          Keys.onEscapePressed: function(event) {
+            if (root.filterQuery !== "") { root.clearFilter(); root.filterField.text = ""; event.accepted = true }
+            else event.accepted = false
+          }
+        }
 
         ListView {
           id: listView

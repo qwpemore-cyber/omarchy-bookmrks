@@ -1,6 +1,6 @@
 const fs = require("fs");
 const src = fs.readFileSync(require("path").join(__dirname, "..", "src", "BookmarkModel.js"), "utf8");
-  const M = new Function(src + "\nreturn {parse,serialize,append,updateAt,removeAt,moveBy,argvFor,iconKind,labelFor,makeId,isIconGlyph,isDesktopId,isSeparatorGlyph,labelForType,TYPE_GLYPHS,typeGlyph,lineHeightFor,isFileTarget,expandHome,fileLabel,TYPES,isSupportedType};")();
+  const M = new Function(src + "\nreturn {parse,serialize,append,updateAt,removeAt,moveBy,argvFor,iconKind,labelFor,makeId,isIconGlyph,isDesktopId,isSeparatorGlyph,labelForType,TYPE_GLYPHS,typeGlyph,lineHeightFor,isFileTarget,expandHome,fileLabel,TYPES,isSupportedType,matches,filterIndexes,filterEntries};")();
 
 const GLYPH = String.fromCodePoint(0x0F488);   // Browser, from stock omarchy menu
 const APPGLYPH = String.fromCodePoint(0xF003B); // Apps
@@ -220,6 +220,47 @@ eq("the leading asked for is the leading delivered",
   eq("a tilde path labels by name", M.labelForType("file", "~/.bashrc"), ".bashrc");
   eq("url labels still strip the scheme", M.labelForType("url", "https://a.com/x"), "a.com");
   eq("cmd labels still take the first word", M.labelForType("cmd", "python3 s.py"), "python3");
+
+  // --- the search box -----------------------------------------------------
+  // The person searching usually remembers the target, not the name they gave
+  // it, so the target has to be searchable too.
+  var lib = [
+    { id: "a", type: "url", label: "GitHub", target: "https://github.com", icon: "" },
+    { id: "b", type: "file", label: "report", target: "/tmp/My Notes/report.md", icon: "" },
+    { id: "c", type: "cmd", label: "Screenshot", target: "omarchy-capture-screenshot", icon: "" },
+    { id: "d", type: "app", label: "Files", target: "org.gnome.Nautilus", icon: "" }
+  ];
+  var st = { version: 1, bookmarks: lib };
+  function labels(q) { return M.filterEntries(st, q).map(function (e) { return e.label; }); }
+
+  eq("an empty query shows everything", labels("").length, 4);
+  eq("a whitespace query shows everything", labels("   ").length, 4);
+  eq("a null query shows everything", labels(null).length, 4);
+  eq("matches the label", labels("git"), ["GitHub"]);
+  eq("is case insensitive", labels("GITHUB"), ["GitHub"]);
+  eq("matches the target, not just the label", labels("github.com"), ["GitHub"]);
+  eq("finds a file by its path", labels("report.md"), ["report"]);
+  eq("finds a file by its folder", labels("My Notes"), ["report"]);
+  eq("finds a command by what it runs", labels("capture"), ["Screenshot"]);
+  eq("finds an app by its desktop id", labels("nautilus"), ["Files"]);
+  // "e" leaves out only the first row and keeps the rest in the order the list
+  // already had, so a filter can never reorder what it does not hide.
+  eq("several hits keep list order", labels("e"), ["report", "Screenshot", "Files"]);
+  eq("no hits is an empty list", labels("zzzz"), []);
+  eq("surrounding space is ignored", labels("  git  "), ["GitHub"]);
+
+  // The positions are into the full list, not into the result, so the first
+  // surviving row after a filter still points at the entry it always pointed at.
+  eq("indexes are positions in the full list",
+     M.filterIndexes(st, "e"), [1, 2, 3]);
+  eq("every row matches an all-rows query",
+     M.filterIndexes(st, "t"), [0, 1, 2, 3]);
+  eq("a filtered index maps to the right entry",
+     lib[M.filterIndexes(st, "report")[0]].label, "report");
+  eq("filtering never mutates the source", st.bookmarks.length, 4);
+  // The filtered list must be the same entries, in the same order, as the rows
+  // they came from, or every index the view hands out points somewhere else.
+  eq("filtered entries keep their ids", M.filterEntries(st, "t").map(function (e) { return e.id; }), ["a", "b", "c", "d"]);
 
   console.log("\n" + pass + " passed, " + fail + " failed");
   process.exit(fail ? 1 : 0);
