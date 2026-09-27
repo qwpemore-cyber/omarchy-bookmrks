@@ -94,9 +94,33 @@ binding, or a script:
 
 ```sh
 omarchy-shell shell toggle omarchy-bookmarks-bar
-omarchy-shell shell call omarchy-bookmarks-bar open
-omarchy-shell shell call omarchy-bookmarks-bar close
+omarchy-shell shell summon omarchy-bookmarks-bar   # open only
+omarchy-shell shell hide omarchy-bookmarks-bar     # close only
 ```
+
+`call` reaches the panel's root item, one argument, so it takes a method and a
+JSON payload. All four verbs answer `"ok"`, `"invalid"` or `"unknown"`, so a
+script can tell the difference between a rejected payload and a row that is not
+there:
+
+```sh
+omarchy-shell shell call omarchy-bookmarks-bar ping ''
+omarchy-shell shell call omarchy-bookmarks-bar dump ''
+
+# add a bookmark
+omarchy-shell shell call omarchy-bookmarks-bar add \
+  '{"type":"url","label":"GitHub","target":"https://github.com"}'
+
+# edit row 0 — "index" is stripped before the entry is validated
+omarchy-shell shell call omarchy-bookmarks-bar update \
+  '{"index":0,"type":"url","label":"GitHub (work)","target":"https://github.com"}'
+
+# remove row 0
+omarchy-shell shell call omarchy-bookmarks-bar remove 0
+```
+
+`remove` takes a row number, not JSON, and a blank or non-numeric argument is
+refused rather than read as row 0.
 
 To rebind it, edit the marked block in `~/.config/hypr/bindings.lua` and run
 `hyprctl reload`. `SUPER + B` is the default because it is free on a stock

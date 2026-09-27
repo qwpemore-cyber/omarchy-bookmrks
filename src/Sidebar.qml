@@ -289,30 +289,54 @@ Item {
     return row
   }
 
+  // ---- scriptable surface --------------------------------------------------
+  //
+  // These live on the root item, not inside the IpcHandler below, because that
+  // is the only place the host can reach. The shell's call() route invokes
+  // loader.item[method](arg) — the plugin's root, one argument — so anything
+  // declared only inside an IpcHandler is unreachable from
+  // `omarchy-shell shell call` and answers "unknown", which looks exactly like
+  // a broken plugin. The internal target name is not a contract, either: a
+  // caller should not have to know that the handler is called "bookmarks".
+  //
+  // One JSON string in, one answer out. Every reply is a string, which is the
+  // shape the shell's own plugins use, so a caller can branch on it instead of
+  // guessing whether the request landed.
+  function ping(): string { return "ok" }
+  function dump(): string { return JSON.stringify(bookmarkList()) }
+
+  function ipcAdd(payloadJson: string): string {
+    return addEntry(parsePayload(payloadJson)) ? "ok" : "invalid"
+  }
+
+  function ipcUpdate(payloadJson: string): string {
+    var payload = parsePayload(payloadJson)
+    if (!Object.prototype.hasOwnProperty.call(payload, "index")) return "invalid"
+    var row = rowFrom(payload.index)
+    delete payload.index
+    if (row < 0) return "invalid"
+    return updateEntry(row, payload) ? "ok" : "unknown"
+  }
+
+  function ipcRemove(rowJson: string): string {
+    var row = rowFrom(rowJson)
+    if (row < 0) return "invalid"
+    return removeEntry(row) ? "ok" : "unknown"
+  }
+
+  // Same four verbs, reached by the plugin's own IPC target for callers that
+  // already speak qs ipc. They forward rather than reimplement, so the two
+  // routes cannot answer differently.
   IpcHandler {
     target: "bookmarks"
-    function add(payloadJson: string): string { return root.addEntry(root.parsePayload(payloadJson)) ? "ok" : "invalid" }
-    function update(payloadJson: string): string {
-      var payload = root.parsePayload(payloadJson)
-      if (!Object.prototype.hasOwnProperty.call(payload, "index")) return "invalid"
-      var row = root.rowFrom(payload.index)
-      delete payload.index
-      if (row < 0) return "invalid"
-      return root.updateEntry(row, payload) ? "ok" : "unknown"
-    }
-    function remove(rowJson: string): string {
-      var row = root.rowFrom(rowJson)
-      if (row < 0) return "invalid"
-      return root.removeEntry(row) ? "ok" : "unknown"
-    }
-    // Every function returns a reply string, which is the shape the shell's
-    // own plugins use; a caller can then branch on the answer instead of
-    // guessing whether the request landed.
+    function ping(): string { return root.ping() }
+    function dump(): string { return root.dump() }
+    function add(payloadJson: string): string { return root.ipcAdd(payloadJson) }
+    function update(payloadJson: string): string { return root.ipcUpdate(payloadJson) }
+    function remove(rowJson: string): string { return root.ipcRemove(rowJson) }
     function open(): string { root.open(); return "ok" }
     function close(): string { root.close(); return "ok" }
     function toggle(): string { root.opened ? root.close() : root.open(); return "ok" }
-    function dump(): string { return JSON.stringify(root.bookmarkList()) }
-    function ping(): string { return "ok" }
   }
 
   // ---- window --------------------------------------------------------------
