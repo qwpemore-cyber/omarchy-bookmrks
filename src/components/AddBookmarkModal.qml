@@ -1,3 +1,8 @@
+// The add/edit form. One component for both, told which by the row it is given.
+// Owns field validation, the type cycle, and focus. Enter submits and Escape
+// cancels, and both are forwarded from the fields — a bare Escape here would
+// close the whole panel instead of the form.
+
 import QtQuick
 import QtQuick.Layouts
 import Quickshell

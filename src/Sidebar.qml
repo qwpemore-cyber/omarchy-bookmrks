@@ -1,3 +1,15 @@
+// The panel root, and the first file to open when something looks wrong.
+//
+// Owns: the data path, the list model, launching, the key map, the two sheets,
+// and the verbs the host calls. It is the only file that knows where
+// ~/.config/omarchy/bookmarks.json is — the settings sheet is told, it does
+// not look.
+//
+// DEBUGGING.md has a symptom table. The short version: a row that renders
+// wrong is BookmarkItem.qml, a form that misbehaves is AddBookmarkModal.qml,
+// a save that is wrong is BookmarkModel.js, and a keystroke that does the
+// wrong thing is here.
+
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
@@ -568,9 +580,13 @@ Item {
               Layout.fillWidth: true
               text: "Press a to add a URL, an app, or a command."
               font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              color: Util.alpha(Color.popups.text, 0.4)
+              font.pixelSize: Style.font.bodySmall
+              color: Util.alpha(Color.popups.text, 0.55)
               wrapMode: Text.WordWrap
+              // Explicit: the default derives the gap from the font's own
+              // metrics, so two lines can land on top of each other and read
+              // as one garbled line. A fixed multiple cannot.
+              lineHeight: 1.3
               horizontalAlignment: Text.AlignHCenter
             }
           }
@@ -593,6 +609,8 @@ Item {
     Components.SettingsModal {
       id: settings
       anchors.fill: parent
+      // The panel owns the path; the sheet is only told.
+      dataPath: root.dataPath
       onClosed: keys.forceActiveFocus()
     }
   }

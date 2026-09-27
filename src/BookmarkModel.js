@@ -2,6 +2,10 @@
 // parsing, normalising, and serialising rules can be reasoned about (and
 // unit-tested) on their own; Sidebar.qml owns every side effect.
 //
+// If a field will not validate, a save lands wrong, a command runs the
+// wrong thing, or an icon never appears: normalize(), validate(),
+// launchArgv(), iconFor(). Those four are the whole surface.
+//
 // Stored shape in ~/.config/omarchy/bookmarks.json:
 //   { "version": 1, "bookmarks": [ { id, type, label, target, icon } ] }
 //

@@ -1,3 +1,10 @@
+// The settings sheet, opened by the gear button in the panel header.
+//
+// Read-only for now: no fields, so nothing has to be forwarded from a text
+// input, and Enter has nothing to submit. dataPath is handed to it by the
+// panel rather than worked out here, so there is one answer to where the
+// bookmarks live. Add new settings inside the ColumnLayout below the title.
+
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
@@ -18,6 +25,13 @@ Item {
   property bool modalOpen: false
 
   signal closed()
+
+  // Where the panel keeps the bookmarks. The default repeats the panel's own
+  // expression so the sheet is right on its own, and Sidebar overwrites it
+  // with root.dataPath so there is one authority, not two that can drift.
+  // This used to be Quickshell.dataPath, which is ~/.local/share — a
+  // different directory, so the sheet pointed at a file that does not exist.
+  property string dataPath: Quickshell.env("HOME") + "/.config/omarchy/bookmarks.json"
 
   function open() {
     modalOpen = true
@@ -90,17 +104,39 @@ Item {
           text: "Nothing to configure yet"
           font.family: Style.font.family
           font.pixelSize: Style.font.body
+          font.bold: true
+          color: Util.alpha(Color.popups.text, 0.9)
+          // Wraps rather than elides: a heading that loses its last word is
+          // worse than a heading on two lines, and at 200px wide this one needs
+          // 173px of the 156px available.
+          wrapMode: Text.WordWrap
+          lineHeight: 1.25
+          horizontalAlignment: Text.AlignHCenter
+        }
+
+        // A path is one long unbreakable token, so it cannot live inside a
+        // wrapped paragraph: it either overflows the card or gets chopped. Its
+        // own row, allowed to elide in the middle, keeps both ends readable
+        // when the panel is narrow.
+        Text {
+          Layout.fillWidth: true
+          Layout.topMargin: Style.space(4)
+          text: root.dataPath
+          font.family: Style.font.family
+          font.pixelSize: Style.font.bodySmall
           color: Util.alpha(Color.popups.text, 0.7)
+          elide: Text.ElideMiddle
           horizontalAlignment: Text.AlignHCenter
         }
 
         Text {
           Layout.fillWidth: true
-          text: "Your bookmarks live in ~/.config/omarchy/bookmarks.json and can be edited there, or from the panel itself."
+          text: "Your bookmarks are kept in that file. Edit it there, or manage them from the panel."
           font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-          color: Util.alpha(Color.popups.text, 0.45)
+          font.pixelSize: Style.font.body
+          color: Util.alpha(Color.popups.text, 0.7)
           wrapMode: Text.WordWrap
+          lineHeight: 1.3
           horizontalAlignment: Text.AlignHCenter
         }
       }

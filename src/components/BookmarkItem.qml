@@ -1,3 +1,8 @@
+// One row in the list: icon, label, target, and the edit/remove buttons that
+// appear on hover. A delegate, so its properties ARE required — the view
+// rejects a row that does not supply them, which is deliberate. If a row
+// renders wrong or the wrong glyph shows, this is the file.
+
 import QtQuick
 import QtQuick.Layouts
 import qs.Commons

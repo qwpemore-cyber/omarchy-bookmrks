@@ -245,6 +245,17 @@ Design notes worth knowing before you change things:
 - **The plugin id.** `omarchy-bookmarks-bar` is fine even though it starts with
   `omarchy-`; the reserved namespace is `omarchy.`, with a dot.
 
+## If something breaks
+
+**[DEBUGGING.md](DEBUGGING.md)** maps each symptom to the file and the function
+that causes it, lists the command that checks each kind of thing, and records
+the mistakes this project has already made — so a second one is recognisable
+rather than new.
+
+Two things are worth knowing before you file anything: the panel is themed by
+the Omarchy shell and does not look right outside it, and QML has no hot
+reload, so an edit needs `omarchy restart shell` before you can see it.
+
 ## Requirements
 
 Omarchy 4.x with Quickshell (`omarchy-shell`). Developed against Omarchy 4.0.4

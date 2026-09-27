@@ -559,6 +559,164 @@ for k in a J K; do
 done
 grep -q . <<<"$declared_keys" && pass "the guide's letter keys are the panel's letter keys"
 
+head_ "the sheet says where the data is, and says it legibly"
+# The sheet showed Quickshell.dataPath, which is ~/.local/share — so it
+# pointed the user at a file that has never existed, under a heading about
+# their real bookmarks. The panel already owned the correct expression; the
+# fix is to hand it over, and the check is that only one expression remains.
+panel_path="$(sed -n 's/.*readonly property string dataPath: \(.*\)$/\1/p' \
+              "$REPO_DIR"/src/Sidebar.qml | head -1)"
+sheet_path="$(sed -n 's/.*property string dataPath: \(.*\)$/\1/p' \
+             "$REPO_DIR"/src/components/SettingsModal.qml | head -1)"
+if [[ -n "$panel_path" && "$panel_path" == "$sheet_path" ]]; then
+  pass "the sheet and the panel agree on the data path"
+else
+  bad "panel says [$panel_path], sheet says [$sheet_path]"
+fi
+# Comments are stripped first: the fix is explained in a comment that names the
+# wrong constant, and a check that reads its own explanation fails forever.
+if sed 's://.*::' "$REPO_DIR"/src/components/SettingsModal.qml \
+     | grep -q "Quickshell\.dataPath"; then
+  bad "the sheet uses Quickshell.dataPath, which is ~/.local/share"
+else
+  pass "the sheet does not confuse data with config"
+fi
+# And the panel must actually hand its path over, or the two agreeing above
+# would be a coincidence rather than a handoff.
+if grep -q "dataPath: root.dataPath" "$REPO_DIR"/src/Sidebar.qml; then
+  pass "the panel hands its own path to the sheet"
+else
+  bad "the sheet keeps its own copy of the path"
+fi
+
+# Every line of prose in the plugin needs an explicit line height. The default
+# is derived from the font's own metrics, so two lines can land on top of each
+# other and read as one garbled line — which is exactly what the settings sheet
+# looked like, and what a screenshot of it could not even be read off.
+unlined=""
+while read -r f; do
+  # A Text block that wraps and does not set lineHeight is the risk. Blocks are
+  # read in pairs of braces, so look at the block, not the whole file.
+  awk -v F="$f" '
+    /Text[[:space:]]*\{/ { inblk=1; buf=""; depth=1; next }
+    inblk { buf = buf $0 "\n"
+            n = gsub(/\{/, "{"); m = gsub(/\}/, "}")
+            depth += n - m
+            if (depth <= 0) {
+              if (buf ~ /wrapMode/ && buf !~ /lineHeight/) print F
+              inblk=0
+            } }
+  ' "$f"
+done < <(find "$REPO_DIR/src" -name '*.qml') > "$WORK/unlined.txt"
+if [[ -s "$WORK/unlined.txt" ]]; then
+  bad "wrapped text with no lineHeight:"
+  sed 's/^/    /' "$WORK/unlined.txt"
+else
+  pass "every wrapped Text sets its own line height"
+fi
+
+# And the sheet's prose has to be readable, which is the reason the sizes were
+# raised: the previous copy was 10px at 45% opacity, which is not a font size.
+sheet_prose="$(sed -n '/Nothing to configure yet/,/^        }$/p' \
+               "$REPO_DIR"/src/components/SettingsModal.qml)"
+small="$(sed -n 's/.*font\.pixelSize: Style\.font\.\([a-zA-Z]*\).*/\1/p' <<<"$sheet_prose" \
+         | grep -cE '^(caption)$' || true)"
+[[ "$small" == "0" ]] && pass "no caption-sized prose in the settings sheet" \
+                    || bad "the settings sheet still uses caption-sized text ($small blocks)"
+faint="$(sed -n 's/.*Color\.popups\.text, 0\.\([0-9]*\)).*/\1/p' <<<"$sheet_prose" \
+         | awk '$1 < 0.5 {c++} END {print c+0}')"
+[[ "$faint" == "0" ]] && pass "no prose dimmer than 50% in the settings sheet" \
+                      || bad "$faint text blocks are dimmer than 50%"
+
+head_ "every line of the settings sheet fits and is legible"
+# The sheet first shipped with 10px text at 45% opacity, no explicit line
+# height, and a path built from an unresolved name — so it rendered as
+# overlapping garbage pointing at a file that does not exist. None of that
+# shows up in a parse check or a "did it instantiate" check, and none of it
+# can be judged by reading the source, because the numbers that matter only
+# exist after layout. So they are measured, at two widths: a panel this size
+# and a deliberately cramped one.
+for sheet_width in 300 200; do
+  cat > "$WORK/shell.qml" <<QML
+import QtQuick
+import "components" as C
+
+Item {
+  id: root
+  width: $sheet_width
+  height: 500
+
+  C.SettingsModal { id: sheet; anchors.fill: parent }
+
+  function walk(it, out) {
+    var kids = it.children
+    for (var i = 0; i < kids.length; i++) {
+      var k = kids[i]
+      if (k.toString().indexOf("QQuickText") >= 0 && (k.text || "") !== "") {
+        out.push([
+          k.lineCount,
+          Math.round(k.width),
+          Math.round(k.contentWidth),
+          Math.round(k.height),
+          Math.round(k.contentHeight),
+          k.font.pixelSize,
+          Math.round(k.lineHeight * 100) / 100,
+          k.text.split("\n")[0].slice(0, 28)
+        ].join("|"))
+      }
+      walk(k, out)
+    }
+  }
+
+  Component.onCompleted: Qt.callLater(function() {
+    sheet.open()
+    Qt.callLater(function() {
+      var out = []
+      walk(sheet, out)
+      console.log("GEOM " + out.join(" ;; "))
+      Qt.callLater(Qt.quit)
+    })
+  })
+}
+QML
+
+  rows="$(run_scene | sed -n 's/.*GEOM \(.*\)/\1/p')"
+  if [[ -z "$rows" ]]; then
+    bad "no geometry reported at ${sheet_width}px"
+    continue
+  fi
+
+  overflow=0; clipped=0; tiny=0; unspecified=0
+  while IFS='|' read -r lines w cw h ch px lh label; do
+    [[ -z "$label" ]] && continue
+    (( cw > w + 1 )) && { overflow=$((overflow+1)); bad "at ${sheet_width}px, \"$label\" is $cw wide in $w"; }
+    (( ch > h + 1 )) && { clipped=$((clipped+1)); bad "at ${sheet_width}px, \"$label\" needs $ch but has $h"; }
+    (( px < 11 )) && { tiny=$((tiny+1)); bad "at ${sheet_width}px, \"$label\" is ${px}px"; }
+    # A line height of exactly 1 on a wrapping Text is the default, which is
+    # the setting that let the lines land on each other in the first place.
+    if (( lines > 1 )) && ! awk -v v="$lh" 'BEGIN{exit !(v>1)}'; then
+      unspecified=$((unspecified+1))
+      bad "at ${sheet_width}px, \"$label\" wraps to $lines lines with lineHeight $lh"
+    fi
+  done < <(tr ';;' '\n' <<<"$rows")
+
+  if (( overflow == 0 && clipped == 0 && tiny == 0 && unspecified == 0 )); then
+    pass "at ${sheet_width}px every line fits, is unclipped, and is at least 11px"
+  fi
+
+  # An unresolved binding is invisible to the walk above, which is why it got
+  # through once already: the engine refuses the assignment and the Text keeps
+  # its default empty string, so there is no wide, no text and nothing to
+  # measure. The engine does complain, so the complaint is the check. Reading
+  # the walk for "undefined" would only ever find the cases that are loud.
+  if run_scene | grep -q "Unable to assign"; then
+    bad "at ${sheet_width}px a binding resolved to undefined:"
+    run_scene | sed -n 's/.*WARN scene: \(@[^ ]*\).*/    \1/p' | sort -u
+  else
+    pass "at ${sheet_width}px no binding resolved to undefined"
+  fi
+done
+
 head_ "the settings sheet behaves"
 # The settings sheet is a second surface over the same list, so the mistakes
 # available here are: a card wider than the panel, and a keystroke reaching
