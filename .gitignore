@@ -1,0 +1,9 @@
+# Nothing generated belongs in the repo, but be explicit anyway.
+*.log
+*.tmp
+*.swp
+.DS_Store
+
+# Local copies of the user's own bookmark list. The example file is tracked;
+# a real one must never be committed.
+bookmarks.json

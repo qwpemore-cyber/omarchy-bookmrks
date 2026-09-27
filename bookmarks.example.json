@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "bookmarks": [
+    {
+      "id": "b-example-url",
+      "type": "url",
+      "label": "GitHub",
+      "target": "https://github.com",
+      "icon": ""
+    },
+    {
+      "id": "b-example-app",
+      "type": "app",
+      "label": "Files",
+      "target": "org.gnome.Nautilus",
+      "icon": "org.gnome.Nautilus"
+    },
+    {
+      "id": "b-example-cmd",
+      "type": "cmd",
+      "label": "Screenshot",
+      "target": "omarchy-capture-screenshot",
+      "icon": ""
+    }
+  ]
+}

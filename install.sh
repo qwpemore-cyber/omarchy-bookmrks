@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+#
+# Install the Bookmarks Bar plugin into the Omarchy shell.
+#
+# The plugin is installed the supported way — a git checkout under
+# ~/.config/omarchy/plugins/<id> — rather than a symlink. omarchy's own
+# `omarchy plugin validate` refuses symlinks inside a plugin folder, and the
+# shell's inotify watcher does not traverse one, so a symlink would validate
+# badly and never hot-reload.
+#
+# Usage:
+#   ./install.sh              install the copy in this folder (edits hot-reload)
+#   ./install.sh --remote     install by cloning from GitHub instead
+#   ./install.sh --no-keybind install without touching ~/.config/hypr
+#   ./install.sh --yes        never prompt (for scripts and agents)
+#   ./install.sh --help
+
+set -euo pipefail
+
+REPO_URL="git@github.com:qwpemore-cyber/omarchy-bookmrks.git"
+REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+PLUGINS_DIR="$HOME/.config/omarchy/plugins"
+DATA_DIR="$HOME/.config/omarchy"
+DATA_FILE="$DATA_DIR/bookmarks.json"
+BINDINGS="$HOME/.config/hypr/bindings.lua"
+
+# The id lives in manifest.json and is read from there, so the shell, this
+# script, and uninstall.sh can never disagree about it.
+MANIFEST="$REPO_DIR/manifest.json"
+PLUGIN_ID="$(jq -r '.id // ""' "$MANIFEST" 2>/dev/null || true)"
+
+BIND_BEGIN="# >>> ${PLUGIN_ID:-bookmarks-bar} >>>"
+BIND_END="# <<< ${PLUGIN_ID:-bookmarks-bar} <<<"
+BIND_KEY="SUPER + B"
+
+MODE="local"
+ADD_KEYBIND=1
+ASSUME_YES=0
+
+bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
+info()  { printf '  %s\n' "$*"; }
+warn()  { printf '  ! %s\n' "$*" >&2; }
+die()   { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
+
+confirm() {
+  local prompt="$1"
+  (( ASSUME_YES )) && return 0
+  if [[ -t 0 && -t 1 ]] && command -v gum >/dev/null 2>&1; then
+    gum confirm "$prompt"
+  else
+    die "refusing to continue without confirmation; re-run with --yes"
+  fi
+}
+
+usage() { sed -n '3,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+
+while (( $# > 0 )); do
+  case "$1" in
+    --remote)     MODE="remote"; shift ;;
+    --dev|--local) MODE="local"; shift ;;
+    --no-keybind) ADD_KEYBIND=0; shift ;;
+    --yes|-y)     ASSUME_YES=1; shift ;;
+    -h|--help)    usage; exit 0 ;;
+    *)            die "unknown option: $1" ;;
+  esac
+done
+
+# ---------------------------------------------------------------- preflight
+
+command -v omarchy >/dev/null 2>&1 || die "omarchy is not on PATH; is this an Omarchy system?"
+command -v jq      >/dev/null 2>&1 || die "jq is required"
+command -v git    >/dev/null 2>&1 || die "git is required"
+
+[[ -f "$MANIFEST" ]] || die "no manifest.json next to this script"
+[[ -n "$PLUGIN_ID" ]] || die "manifest.json has no id"
+[[ -x /usr/bin/quicksell || -n "$(command -v quickshell)" ]] || die "quickshell is not on PATH"
+
+# Validate before anything is copied, so a malformed manifest never reaches
+# the trusted plugins directory. This is the same check the shell enforces.
+omarchy plugin validate "$REPO_DIR" >/dev/null || die "manifest failed validation; nothing was installed"
+
+bold "Bookmarks Bar"
+info "id       $PLUGIN_ID"
+info "source   $([[ $MODE == remote ]] && echo "$REPO_URL" || echo "$REPO_DIR")"
+
+# ---------------------------------------------------------------- installed?
+
+target="$PLUGINS_DIR/$PLUGIN_ID"
+if [[ -e "$target" || -L "$target" ]]; then
+  if confirm "$PLUGIN_ID is already installed. Update it?"; then
+    bold "Updating"
+    omarchy plugin update "$PLUGIN_ID" --yes
+  else
+    info "left the installed copy alone"
+    exit 0
+  fi
+else
+  # A local-path install needs the folder to be a git checkout: the shell's
+  # plugin lifecycle (and `omarchy plugin update`) assume one.
+  if [[ $MODE == local ]]; then
+    if [[ ! -d "$REPO_DIR/.git" ]]; then
+      git -C "$REPO_DIR" init -q
+      warn "initialised a git repo here, because a plugin must be a git checkout"
+    fi
+    if ! git -C "$REPO_DIR" remote get-url origin >/dev/null 2>&1; then
+      git -C "$REPO_DIR" remote add origin "$REPO_URL"
+    fi
+  fi
+
+  bold "Installing"
+  if [[ $MODE == remote ]]; then
+    omarchy plugin add "$REPO_URL" --enable --yes
+  else
+    omarchy plugin add "$REPO_DIR" --enable --yes
+  fi
+fi
+
+omarchy-shell -q shell rescanPlugins || true
+
+# ---------------------------------------------------------------- data file
+
+# The user's data lives outside the plugin folder, so reinstalling or
+# removing the plugin never touches it. Seed it once, and never overwrite.
+if [[ ! -f "$DATA_FILE" && -f "$REPO_DIR/bookmarks.example.json" ]]; then
+  mkdir -p "$DATA_DIR"
+  cp "$REPO_DIR/bookmarks.example.json" "$DATA_FILE"
+  info "seeded $DATA_FILE from bookmarks.example.json"
+fi
+
+# ---------------------------------------------------------------- keybinding
+
+if (( ADD_KEYBIND )); then
+  if ! command -v hyprctl >/dev/null 2>&1; then
+    warn "hyprctl not found; skipped the keybinding"
+  elif [[ ! -f "$BINDINGS" ]]; then
+    warn "$BINDINGS not found; add the binding by hand:"
+    warn "  o.bind(\"$BIND_KEY\", \"Bookmarks bar\", \"omarchy-shell shell toggle $PLUGIN_ID\")"
+  else
+    # Rewritten rather than appended to, so re-running the installer cannot
+    # stack duplicate blocks. awk is used rather than sed -i so the target
+    # file keeps its own mode and ownership.
+    stripped="$(mktemp)"
+    updated="$(mktemp)"
+
+    awk -v b="$BIND_BEGIN" -v e="$BIND_END" '
+      $0 == b { skip = 1; next }
+      $0 == e { skip = 0; next }
+      !skip { print }
+    ' "$BINDINGS" >"$stripped"
+
+    {
+      # Trim trailing blank lines a previous run may have left, then add
+      # exactly one separator and one block.
+      awk '{ lines[NR] = $0 } END {
+        last = NR
+        while (last > 0 && lines[last] ~ /^[[:space:]]*$/) last--
+        for (i = 1; i <= last; i++) print lines[i]
+      }' "$stripped"
+      printf '\n%s\n' "$BIND_BEGIN"
+      printf 'o.bind("%s", "Bookmarks bar", "omarchy-shell shell toggle %s")\n' "$BIND_KEY" "$PLUGIN_ID"
+      printf '%s\n' "$BIND_END"
+    } >"$updated"
+
+    if cmp -s "$updated" "$BINDINGS"; then
+      info "keybinding already present"
+    else
+      # Write through the original inode so its mode and ownership survive;
+      # replacing the file with a mktemp one would not.
+      cat "$updated" >"$BINDINGS"
+      hyprctl reload >/dev/null 2>&1 || warn "hyprctl reload failed; bindings apply on next login"
+      info "bound $BIND_KEY to toggle the sidebar"
+    fi
+    rm -f "$stripped" "$updated"
+  fi
+fi
+
+# ---------------------------------------------------------------- done
+
+echo
+bold "Installed"
+info "toggle    omarchy-shell shell toggle $PLUGIN_ID"
+info "data      $DATA_FILE"
+info "list      omarchy plugin list | grep $PLUGIN_ID"
+[[ $MODE == local ]] && info "update    ./install.sh   (or: omarchy plugin update $PLUGIN_ID)"
+[[ $MODE == remote ]] && info "update    omarchy plugin update $PLUGIN_ID"
+echo
+info "press $BIND_KEY, or run the toggle command above"

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "omarchy-bookmarks-bar",
+  "name": "Bookmarks Bar",
+  "version": "1.0.0",
+  "author": "qupemore-cyber",
+  "description": "Left-edge sidebar launcher for web URLs, desktop apps, and shell commands",
+  "kinds": [
+    "panel"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "panel": "src/Sidebar.qml"
+  }
+}
