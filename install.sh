@@ -98,6 +98,23 @@ target="$PLUGINS_DIR/$PLUGIN_ID"
 if [[ -e "$target" || -L "$target" ]]; then
   if confirm "$PLUGIN_ID is already installed. Update it?"; then
     bold "Updating"
+
+    # `omarchy plugin update` reporting success does not mean the files match
+    # the source. It fast-forwards HEAD, and a tree that was edited in place
+    # keeps every one of those edits while HEAD already sits on the right
+    # commit — so a stale or hand-modified panel survives an "update" that
+    # claims to have worked. This bit me while diagnosing a bug: the fix was
+    # committed, the install said "keybinding already present", and the change
+    # was never on screen. So the tree is checked, not the commit.
+    if [[ -n "$(git -C "$target" status --porcelain 2>/dev/null)" ]]; then
+      warn "the installed copy has local edits; restoring it from the source"
+      src="$REPO_DIR"
+      [[ $MODE == remote ]] && src="origin"
+      git -C "$target" fetch --quiet --no-tags "$src" \
+        && git -C "$target" reset --hard --quiet FETCH_HEAD \
+        && git -C "$target" clean -fdq
+    fi
+
     if omarchy plugin update "$PLUGIN_ID" --yes; then
       :
     else
