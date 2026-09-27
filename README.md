@@ -115,15 +115,27 @@ Omarchy install — change it freely.
 `BookmarkModel.js` is deliberately free of QML so it can be tested on its own:
 
 ```sh
-node test/bookmark-model.test.js
+node test/bookmark-model.test.js     # the data layer
+./test/smoke.sh                      # QML, rendering, injection, lint, manifest
 ```
+
+`smoke.sh` runs everything under `QT_QPA_PLATFORM=offscreen`, so it never
+draws on the running session. That is not just politeness: a bare `quickshell`
+instance does not inherit the hosted plugin's theme, so an on-screen test run
+paints the wrong colours and looks like a broken panel when it is only a test
+artefact. What it can cover is parsing, the data pipeline under hostile input,
+row and form instantiation, and the icon lookup; the panel window itself needs
+a real Wayland display, so that part is exercised by running the plugin.
 
 Design notes worth knowing before you change things:
 
-- **Launching.** `url` goes to `omarchy-launch-webapp`, `app` to `omarchy-launch`
-  (or `gtk-launch` for a desktop id), and `cmd` to `bash -c`. Everything is
-  passed as an argv array, never through a shell string, so a target
-  containing spaces or quotes is handled correctly.
+- **Launching.** `url` goes to `omarchy-launch-webapp`, `app` to `gtk-launch`
+  for a desktop id or `uwsm-app --` for a bare command, and `cmd` to `bash -c`.
+  Everything is passed as an argv array, never through a shell string, so a
+  target containing spaces or quotes is handled correctly. The one place a
+  shell script is unavoidable — resolving a desktop id to an icon file — takes
+  the id as a positional parameter, because interpolating it into the script
+  text would let a name like `x$(rm -rf ~)` run.
 - **Writes.** The file is written to a temporary file and renamed into place,
   so an interrupted save cannot leave a truncated list behind.
 - **The plugin id.** `omarchy-bookmarks-bar` is fine even though it starts with

@@ -186,9 +186,14 @@ function argvFor(entry) {
     return ["omarchy-launch-webapp", normalized.target]
   }
   if (normalized.type === "app") {
+    // A desktop id is launched by its .desktop file, which carries the
+    // Exec line, the icon, and the startup hints. Anything else is a bare
+    // command, and that goes through uwsm-app — the same wrapper the shell's
+    // own panels use, so the app is started in the graphical session rather
+    // than in this process's environment.
     return isDesktopId(normalized.target)
       ? ["gtk-launch", normalized.target]
-      : ["omarchy-launch", normalized.target]
+      : ["uwsm-app", "--", normalized.target]
   }
   return ["bash", "-c", normalized.target]
 }

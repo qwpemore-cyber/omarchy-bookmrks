@@ -67,13 +67,30 @@ eq("bad icon dropped", M.parse('[{"type":"app","target":"a","icon":"a/b"}]').boo
 
 // --- argv construction (no shell for url/app)
 eq("url argv", M.argvFor({type:"url",target:"https://a.com"}), ["omarchy-launch-webapp","https://a.com"]);
-eq("app argv exec", M.argvFor({type:"app",target:"firefox"}), ["omarchy-launch","firefox"]);
+eq("app argv bare command", M.argvFor({type:"app",target:"firefox"}), ["uwsm-app","--","firefox"]);
 eq("app argv desktop", M.argvFor({type:"app",target:"org.gnome.Nautilus"}), ["gtk-launch","org.gnome.Nautilus"]);
 eq("cmd argv", M.argvFor({type:"cmd",target:"ls | wc -l"}), ["bash","-c","ls | wc -l"]);
 eq("argv rejects bad type", M.argvFor({type:"bad",target:"x"}), []);
 eq("argv rejects empty", M.argvFor({type:"url",target:""}), []);
 eq("injection stays one arg", M.argvFor({type:"url",target:"x; rm -rf /"}).length, 2);
 eq("injection literal", M.argvFor({type:"url",target:"x; rm -rf /"})[1], "x; rm -rf /");
+
+// --- every launcher the model can emit must exist on this machine
+// The suite above happily asserted an argv whose first element was a command
+// that was never installed, so the shape of the argv is checked against the
+// real PATH here. Only the program is checked: the target is user data.
+const { execFileSync } = require("child_process");
+const which = (p) => { try { execFileSync("which", [p], { stdio: ["ignore", "pipe", "ignore"] }); return true; } catch { return false; } };
+const emitted = new Set();
+for (const t of ["url", "app", "cmd"])
+  for (const target of ["https://a.com", "org.gnome.Nautilus", "firefox", "ls"]) {
+    const argv = M.argvFor({ type: t, target });
+    // argv[0] is always the program; everything after it is user data.
+    if (argv.length > 0) emitted.add(argv[0]);
+  }
+
+for (const prog of [...emitted].sort())
+  eq(`${prog} exists on PATH`, which(prog), true);
 
 // --- mutations
 let s = {version:1,bookmarks:M.parse('[{"type":"app","target":"a"},{"type":"app","target":"b"},{"type":"app","target":"c"}]').bookmarks};
@@ -95,6 +112,29 @@ eq("trailing newline", M.serialize(s).endsWith("\n"), true);
 eq("serialize then append", M.parse(M.serialize(M.append(s,{type:"app",target:"z"}))).bookmarks.length, 4);
 eq("round trip keeps glyph icon", M.parse(M.serialize(M.append(s,{type:"app",target:"z",icon:GLYPH}))).bookmarks[3].icon, GLYPH);
 eq("round trip keeps id", M.parse(M.serialize(s)).bookmarks[0].id, s.bookmarks[0].id);
+
+
+// --- icon lookup script: the icon name must never reach the shell as code
+// The panel passes the name as a positional parameter and reads "$1". Splicing
+// it into the script text with JSON.stringify is not safe: JSON only quotes
+// for JSON, and bash still expands $(...) and `...` inside double quotes, so an
+// icon name could run a command. This checks the real script text.
+const source = fs.readFileSync(require("path").join(__dirname, "..", "src", "Sidebar.qml"), "utf8");
+eq("script reads the name as $1", source.includes('\\"$1\\"'), true);
+eq("script never interpolates the name", source.includes("JSON.stringify(iconName)"), false);
+eq("the name is passed as an argument", /\"bookmarks-icon\", iconName\]/.test(source), true);
+
+// Confirm the two forms behave differently under a real shell, so the reason
+// for the positional parameter is on the record rather than just asserted.
+const sh = (s, ...a) => execFileSync("bash", ["-lc", s, "bookmarks-icon", ...a], { encoding: "utf8" });
+const tmpdir = fs.mkdtempSync("/tmp/iconinjection-");
+const canary = `${tmpdir}/canary`;
+const evil = `x$(touch ${canary})`;
+try { sh('n="$1"; echo "$n"', evil); } catch {}
+eq("positional parameter blocks substitution", fs.existsSync(canary), false);
+try { sh('n=' + JSON.stringify(evil) + '; echo "$n"', evil); } catch {}
+eq("JSON.stringify in the script text does not", fs.existsSync(canary), true);
+fs.rmSync(tmpdir, { recursive: true, force: true });
 
 console.log("\n" + pass + " passed, " + fail + " failed");
 process.exit(fail ? 1 : 0);

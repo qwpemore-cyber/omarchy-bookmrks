@@ -28,6 +28,7 @@ Item {
   // Set while the shell is hiding us, so the two close paths stay
   // distinguishable and the shell's openPanelIds never drifts out of sync.
   property bool closingFromHost: false
+  property bool hidePending: false
   readonly property bool opened: window.opened
 
   // The shell injects its facade here; the fallback keeps the panel usable
@@ -43,9 +44,15 @@ Item {
     // A panel the user dismissed has to tell the shell, or its openPanelIds
     // still claims to be open and the next toggle hides a panel that is not
     // showing.
-    if (!closingFromHost && pluginId !== "" && shell && typeof shell.hide === "function") {
-      closingFromHost = true
-      shell.hide(pluginId)
+    if (!closingFromHost && shell && typeof shell.hide === "function") {
+      if (pluginId === "") {
+        // The manifest has not been read yet, so there is no id to hide. The
+        // dismissal is remembered and replayed below, once there is one.
+        hidePending = true
+      } else {
+        closingFromHost = true
+        shell.hide(pluginId)
+      }
     }
     window.opened = false
     closingFromHost = false
@@ -127,7 +134,12 @@ Item {
 
   function updateEntry(row, payload) {
     if (row < 0 || row >= listModel.count) return false
-    var next = Model.updateAt({ version: 1, bookmarks: bookmarkList() }, row, payload)
+    // A partial payload cannot be normalised, and updateAt would hand the row
+    // straight back. Saying "ok" to a caller whose edit vanished is worse than
+    // refusing, so the rejection is reported instead of swallowed.
+    if (!Model.normalizeEntry(payload)) return false
+    var before = bookmarkList()
+    var next = Model.updateAt({ version: 1, bookmarks: before }, row, payload)
     persist(next)
     rebuild(next)
     selectedIndex = Util.clamp(row, 0, listModel.count - 1)
@@ -183,17 +195,21 @@ Item {
   }
 
   // Lookups run one at a time through a single Process, so opening a long
-  // list cannot spawn a burst of shells.
+  // list cannot spawn a burst of shells. Stale jobs are dropped in a loop
+  // rather than by recursing, because a rebuild can invalidate every queued
+  // row at once and the recursion would be as deep as the list.
   function pumpIconQueue() {
-    if (iconLookupBusy || iconQueue.length === 0) return
-    var job = iconQueue.shift()
+    while (!iconLookupBusy && iconQueue.length > 0) {
+      var job = iconQueue.shift()
 
-    // The list may have been rebuilt between queueing and running.
-    var entry = entryAt(job.row)
-    if (!entry || entry.icon !== job.name) return pumpIconQueue()
+      // The list may have been rebuilt between queueing and running.
+      var entry = entryAt(job.row)
+      if (!entry || entry.icon !== job.name) continue
 
-    iconLookup.iconName = job.name
-    iconLookup.running = true
+      iconLookup.iconName = job.name
+      iconLookup.running = true
+      return
+    }
   }
 
   function onIconResolved(iconName, url) {
@@ -244,19 +260,33 @@ Item {
     }
   }
 
+  // Index arguments arrive as strings over IPC, and `Number("")` is 0, so a
+  // caller that passes an empty or non-numeric value would otherwise address
+  // row 0 — and a remove would delete the first bookmark. Anything that is not
+  // a plain integer is rejected before it reaches a mutation.
+  function rowFrom(value) {
+    if (value === null || value === undefined) return -1
+    var text = String(value).trim()
+    if (!/^-?\d+$/.test(text)) return -1
+    var row = Number(text)
+    if (row < 0 || row >= listModel.count) return -1
+    return row
+  }
+
   IpcHandler {
     target: "bookmarks"
     function add(payloadJson: string): string { return root.addEntry(root.parsePayload(payloadJson)) ? "ok" : "invalid" }
     function update(payloadJson: string): string {
       var payload = root.parsePayload(payloadJson)
-      var row = Number(payload.index)
+      if (!Object.prototype.hasOwnProperty.call(payload, "index")) return "invalid"
+      var row = root.rowFrom(payload.index)
       delete payload.index
-      if (isNaN(row)) return "invalid"
+      if (row < 0) return "invalid"
       return root.updateEntry(row, payload) ? "ok" : "unknown"
     }
     function remove(rowJson: string): string {
-      var row = Number(String(rowJson))
-      if (isNaN(row)) return "invalid"
+      var row = root.rowFrom(rowJson)
+      if (row < 0) return "invalid"
       return root.removeEntry(row) ? "ok" : "unknown"
     }
     // Every function returns a reply string, which is the shape the shell's
@@ -486,6 +516,12 @@ Item {
     printErrors: false
     onLoaded: {
       try { root.pluginId = String(JSON.parse(text()).id || "") } catch (e) { root.pluginId = "" }
+      // A dismissal that arrived before the id was known still has to reach
+      // the shell, or openPanelIds keeps a panel it thinks is showing.
+      if (root.pluginId !== "" && root.hidePending) {
+        root.hidePending = false
+        root.close()
+      }
     }
   }
 
@@ -506,10 +542,15 @@ Item {
       root.iconLookupBusy = false
       root.pumpIconQueue()
     }
-    command: ["bash", "-lc", searchScript()]
+    // The icon name arrives from the data file, so it is passed as a
+    // positional parameter and read back as "$1" — never interpolated into
+    // the script text. A name like `x$(rm -rf ~)` is a literal string to the
+    // shell that way, where splicing it in with JSON.stringify would let bash
+    // run the substitution.
+    command: ["bash", "-lc", searchScript(), "bookmarks-icon", iconName]
 
     function searchScript() {
-      return "n=" + JSON.stringify(iconName) + "; for d in \"$HOME/.local/share/icons\" \"$HOME/.icons\" /usr/share/icons /usr/local/share/icons; do"
+      return "n=\"$1\"; for d in \"$HOME/.local/share/icons\" \"$HOME/.icons\" /usr/share/icons /usr/local/share/icons; do"
         + " [ -d \"$d\" ] || continue;"
         + " for e in png svg xpm; do [ -f \"$d/$n.$e\" ] && printf 'file://%s' \"$d/$n.$e\" && exit 0; done;"
         + " r=$(find \"$d\" -type f -name \"$n.*\" 2>/dev/null | head -n 1);"
