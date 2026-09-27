@@ -31,6 +31,12 @@ Item {
   property bool hidePending: false
   readonly property bool opened: window.opened
 
+  // True while either sheet is on top. Everything that acts on the list — the
+  // highlight, launching, deleting — has to check this, because a sheet draws
+  // a scrim over the list without removing it. Enter with the settings sheet
+  // open would otherwise launch a bookmark the user cannot see.
+  readonly property bool overlayOpen: modal.opened || settings.opened
+
   // The shell injects its facade here; the fallback keeps the panel usable
   // if it is ever loaded outside the host.
   property var shell: null
@@ -237,6 +243,9 @@ Item {
 
   function activateCursor() {
     if (modal.opened) { modal.submit(); return }
+    // The settings sheet is read-only, so Enter has nothing to submit and must
+    // not fall through to the list behind it.
+    if (settings.opened) return
     if (selectedIndex < 0) return
     launchEntry(selectedIndex)
   }
@@ -259,7 +268,16 @@ Item {
 
   function openModal(row) {
     if (row >= 0 && row >= listModel.count) return
+    // The two sheets cannot both own the surface. Whichever is opened closes
+    // the other, and the bookmark form is closed rather than left open
+    // underneath, because two visible sheets would both be drawing a scrim.
+    settings.close()
     modal.openFor(row, row >= 0 ? entryAt(row) : null)
+  }
+
+  function openSettings() {
+    modal.close()
+    settings.open()
   }
 
   // ---- ipc -----------------------------------------------------------------
@@ -404,12 +422,17 @@ Item {
         // An open form owns the keyboard.
         blocked: modal.opened
         onMoveRequested: function(dx, dy) {
+          if (root.overlayOpen) return
           root.moveCursor(dy)
           listView.positionViewAtIndex(root.selectedIndex, ListView.Contain)
         }
         onActivateRequested: root.activateCursor()
-        onCloseRequested: modal.opened ? modal.cancel() : root.close()
+        // The sheet that is open gets Escape; only a bare panel closes.
+        onCloseRequested: modal.opened ? modal.cancel()
+          : settings.opened ? settings.cancel()
+          : root.close()
         onDeleteRequested: function() {
+          if (root.overlayOpen) return
           if (root.selectedIndex >= 0) root.removeEntry(root.selectedIndex)
         }
         onTextKey: function(t) {
@@ -423,8 +446,11 @@ Item {
         onTabRequested: function(direction) {
           // Tab edits the current row, Shift+Tab removes it, so the mouse-only
           // actions stay reachable from the keyboard.
-          if (direction > 0) root.openModal(root.selectedIndex < 0 ? 0 : root.selectedIndex)
-          else if (root.selectedIndex >= 0) root.removeEntry(root.selectedIndex)
+          if (direction > 0) {
+            root.openModal(root.selectedIndex < 0 ? 0 : root.selectedIndex)
+          } else if (!root.overlayOpen && root.selectedIndex >= 0) {
+            root.removeEntry(root.selectedIndex)
+          }
         }
       }
 
@@ -453,6 +479,18 @@ Item {
             font.pixelSize: Style.font.caption
             color: Util.alpha(Color.popups.text, 0.45)
             horizontalAlignment: Text.AlignRight
+          }
+
+          Button {
+            text: ""
+            // "Settings", from the stock Omarchy menu, so the codepoint is one
+            // this desktop's Nerd Font is known to carry.
+            iconText: String.fromCodePoint(0xF0493)
+            tooltipText: "Settings"
+            horizontalPadding: Style.space(5)
+            verticalPadding: Style.space(3)
+            fontSize: Style.font.bodySmall
+            onClicked: root.openSettings()
           }
 
           Button {
@@ -488,7 +526,7 @@ Item {
             required property string iconSource
 
             width: ListView.view.width
-            hasCursor: root.opened && !modal.opened && root.selectedIndex === index
+            hasCursor: root.opened && !root.overlayOpen && root.selectedIndex === index
 
             onActivated: {
               root.selectedIndex = index
@@ -550,6 +588,12 @@ Item {
         keys.forceActiveFocus()
       }
       onCancelled: keys.forceActiveFocus()
+    }
+
+    Components.SettingsModal {
+      id: settings
+      anchors.fill: parent
+      onClosed: keys.forceActiveFocus()
     }
   }
 

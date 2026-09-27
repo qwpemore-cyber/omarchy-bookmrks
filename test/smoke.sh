@@ -559,6 +559,122 @@ for k in a J K; do
 done
 grep -q . <<<"$declared_keys" && pass "the guide's letter keys are the panel's letter keys"
 
+head_ "the settings sheet behaves"
+# The settings sheet is a second surface over the same list, so the mistakes
+# available here are: a card wider than the panel, and a keystroke reaching
+# the list while the sheet is on top. The second is the dangerous one — Enter
+# with the sheet open would launch a bookmark nobody can see.
+cat > "$WORK/shell.qml" <<'QML'
+import QtQuick
+import QtQuick.Layouts
+import "components" as C
+
+Item {
+  id: harness
+  width: 400
+  height: 500
+
+  property int closedCount: 0
+
+  // The bookmark form and the settings sheet, side by side, which is the only
+  // arrangement in which "opening one closes the other" can be observed.
+  C.AddBookmarkModal {
+    id: modal
+    anchors.fill: parent
+  }
+  C.SettingsModal {
+    id: settings
+    anchors.fill: parent
+    onClosed: harness.closedCount++
+  }
+
+  Component.onCompleted: {
+    var out = []
+
+    // Neither open: the list owns the surface.
+    out.push("startsClosed=" + (!modal.opened && !settings.opened))
+
+    // Opening the settings sheet must not drag the bookmark form up too.
+    settings.open()
+    out.push("settingsOpens=" + (settings.opened === true))
+    out.push("formStaysClosed=" + (modal.opened === false))
+
+    // Escape closes the sheet that is open, and the panel is not involved.
+    var esc = { key: Qt.Key_Escape, accepted: false }
+    settings.close()
+    out.push("settingsCloses=" + (settings.opened === false))
+    out.push("closeWasSignalled=" + (harness.closedCount === 1))
+
+    settings.open()
+    modal.openFor(-1, { type: "url", label: "x", target: "https://x.example", icon: "" })
+    out.push("formOpensToo=" + (modal.opened === true))
+    modal.close()
+    out.push("formCloses=" + (modal.opened === false))
+
+    console.log("SETTINGS " + out.join(" "))
+    Qt.callLater(Qt.quit)
+  }
+}
+QML
+
+out="$(run_scene)"
+results="$(printf '%s' "$out" | sed -n 's/.*SETTINGS //p')"
+if [[ -z "$results" ]]; then
+  bad "the settings harness reported nothing"
+  printf '%s\n' "$out" | grep -vE "$noise" | tail -8
+else
+  for pair in $results; do
+    case "$pair" in
+      *=true)  pass "${pair%%=*}" ;;
+      *=false) bad "${pair%%=*}" ;;
+      *)       bad "unreadable result: $pair" ;;
+    esac
+  done
+fi
+
+# "Opening one sheet closes the other" is the panel's policy, not a property of
+# either sheet, and the harness above cannot reach it: calling modal.openFor()
+# directly skips root.openModal(), which is where the policy lives, and the
+# panel's own root cannot be instantiated offscreen because it owns a
+# PanelWindow. So the policy is checked where it is written. Asserting the
+# behaviour here instead would mean asserting that openFor() closes a sheet it
+# has never heard of.
+for pair in "openModal:settings.close()" "openSettings:modal.close()"; do
+  fn="${pair%%:*}"; call="${pair##*:}"
+  body="$(sed -n "/function ${fn}(/,/^  }$/p" "$REPO_DIR"/src/Sidebar.qml)"
+  if grep -q "${call%%(*}" <<<"$body"; then
+    pass "$fn closes the other sheet"
+  else
+    bad "$fn does not close the other sheet"
+  fi
+done
+
+# The panel must consult one flag before acting on the list, and both sheets
+# have to be part of it — a check that only looked at the bookmark form would
+# pass while Enter still launched things through the settings sheet.
+sidebar="$REPO_DIR"/src/Sidebar.qml
+if grep -q "overlayOpen: modal.opened || settings.opened" "$sidebar"; then
+  pass "one flag says a sheet owns the surface"
+else
+  bad "there is no single overlay flag covering both sheets"
+fi
+for guard in "onMoveRequested: function(dx, dy) {" "onDeleteRequested: function() {"; do
+  body="$(sed -n "/$guard/,/^        }$/p" "$sidebar")"
+  grep -q "overlayOpen" <<<"$body" || bad "a list action does not check the overlay flag"
+done
+grep -q "if (settings.opened) return" "$sidebar" \
+  && pass "Enter with the settings open does not reach the list" \
+  || bad "Enter can still reach the list through the settings sheet"
+grep -q "onCloseRequested: modal.opened ?" "$sidebar" && grep -q "settings.cancel()" "$sidebar" \
+  && pass "Escape closes the sheet that is open" \
+  || bad "Escape does not know about the settings sheet"
+
+# The width rule has to hold for the new card too, not just the bookmark form.
+card_w="$(sed -n 's/.*width: Math\.min(Style\.space(\([0-9]*\)), parent\.width.*/\1/p' \
+          "$REPO_DIR"/src/components/SettingsModal.qml | head -1)"
+[[ -n "$card_w" ]] && pass "the settings card is clamped to the panel" \
+                  || bad "the settings card sets a literal width with no parent clamp"
+
 head_ "the icon lookup cannot become a shell command"
 canary="$WORK/canary"
 # A name that would run a command if it were spliced into the script text. The
