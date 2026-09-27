@@ -3,17 +3,21 @@
 # Install the Bookmarks Bar plugin into the Omarchy shell.
 #
 # The plugin is installed the supported way — a git checkout under
-# ~/.config/omarchy/plugins/<id> — rather than a symlink. omarchy's own
-# `omarchy plugin validate` refuses symlinks inside a plugin folder, and the
-# shell's inotify watcher does not traverse one, so a symlink would validate
-# badly and never hot-reload.
+# ~/.config/omarchy/plugins/<id> — rather than a symlink, which
+# `omarchy plugin validate` rejects outright:
+# "symlinks are not allowed inside a plugin folder".
 #
 # Usage:
-#   ./install.sh              install the copy in this folder (edits hot-reload)
+#   ./install.sh              install the copy in this folder
 #   ./install.sh --remote     install by cloning from GitHub instead
 #   ./install.sh --no-keybind install without touching ~/.config/hypr
 #   ./install.sh --yes        never prompt (for scripts and agents)
 #   ./install.sh --help
+#
+# After editing the plugin's QML, run `omarchy restart shell`. The shell sets
+# QS_DISABLE_FILE_WATCHER=1 so a half-written tree is never loaded mid-write,
+# which also means QML edits do not hot-reload; only manifest.json changes are
+# noticed on their own.
 
 set -euo pipefail
 
@@ -94,7 +98,35 @@ target="$PLUGINS_DIR/$PLUGIN_ID"
 if [[ -e "$target" || -L "$target" ]]; then
   if confirm "$PLUGIN_ID is already installed. Update it?"; then
     bold "Updating"
-    omarchy plugin update "$PLUGIN_ID" --yes
+    if omarchy plugin update "$PLUGIN_ID" --yes; then
+      :
+    else
+      # `omarchy plugin update` only fast-forwards, and that has no second
+      # route out. An install directory whose upstream history was rewritten
+      # can never fast-forward onto it again, and neither can one with local
+      # edits — both leave the user holding a stale copy with a plugin they
+      # cannot refresh, and `update` is the supported command. The directory
+      # is a copy of the source and holds no user data (the bookmarks live in
+      # ~/.config/omarchy/bookmarks.json), so it is safe to bring the tree
+      # back into line with the source rather than leave it stale.
+      warn "plugin update could not fast-forward; re-syncing the install directory"
+      src="$REPO_DIR"
+      [[ $MODE == remote ]] && src="origin"
+      git -C "$target" fetch --quiet --no-tags "$src" \
+        && git -C "$target" reset --hard --quiet FETCH_HEAD \
+        && git -C "$target" clean -fdq
+
+      # A silent no-op here would report success and leave the broken copy in
+      # place, so the result is checked rather than assumed.
+      if [[ $MODE == local ]]; then
+        want="$(git -C "$REPO_DIR" rev-parse HEAD)"
+        got="$(git -C "$target" rev-parse HEAD)"
+        if [[ "$want" != "$got" ]]; then
+          die "re-sync left the install directory at $got, expected $want"
+        fi
+        info "install directory re-synced to $got"
+      fi
+    fi
   else
     info "left the installed copy alone"
     exit 0

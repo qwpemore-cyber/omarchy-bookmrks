@@ -13,16 +13,27 @@ import "../BookmarkModel.js" as Model
 Item {
   id: root
 
-  // ---- data roles, supplied by the delegate
-  required property int index
-  required property string entryId
-  required property string type
-  required property string label
-  required property string target
-  required property string icon
+  // ---- data, supplied by the delegate
+  //
+  // Plain properties with defaults, deliberately not `required`. A delegate
+  // fills a component's required properties from model roles by re-declaring
+  // them, and when the component declares the same ones as required the two
+  // declarations collide: the roles stop binding and every required property
+  // reports "was not initialized". The shell's own delegates declare `required`
+  // in the delegate alone, for this reason. The delegate in Sidebar.qml is
+  // where the model roles and their required-ness belong.
+  //
+  // `index` is not here at all: a delegate already has the row index, and
+  // declaring one in the component would shadow the context property the
+  // delegate's handlers read.
+  property string entryId: ""
+  property string type: ""
+  property string label: ""
+  property string target: ""
+  property string icon: ""
   // A resolved file:// URL for a desktop-icon id, or "" when there is no
   // icon to draw (see Sidebar.qml's icon lookup).
-  required property string iconSource
+  property string iconSource: ""
 
   // Set by the delegate so the mouse and the keyboard agree on which row is
   // current. Never read containsMouse here: the panel owns that state.

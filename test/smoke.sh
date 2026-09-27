@@ -155,6 +155,111 @@ else
   bad "no errors while rendering hostile labels"; printf '%s\n' "$real_errors"
 fi
 
+head_ "the real delegate, fed by a real model"
+# Hand-built rows proved nothing about the delegate: the required properties
+# that a ListView fills from model roles are exactly what the panel gets wrong,
+# and only a real ListView can fill them. The panel reported
+# "Required property label was not initialized" the first time it ran against
+# live data, so this scene mirrors rebuild() and the delegate as they are.
+cat > "$WORK/shell.qml" <<'QML'
+import QtQuick
+import QtQuick.Layouts
+import "components" as C
+
+Item {
+  id: harness
+  width: 340
+  height: 600
+
+  property ListModel listModel: ListModel {}
+  property var list: [
+    { id: "b-example-url", type: "url", label: "GitHub", target: "https://github.com", icon: "" },
+    { id: "b-example-app", type: "app", label: "Files", target: "org.gnome.Nautilus", icon: "org.gnome.Nautilus" },
+    { id: "b-example-cmd", type: "cmd", label: "Screenshot", target: "omarchy-capture-screenshot", icon: "" }
+  ]
+
+  function rebuild(list) {
+    listModel.clear()
+    for (var i = 0; i < list.length; i++) {
+      var entry = list[i]
+      listModel.append({
+        entryId: entry.id,
+        type: entry.type,
+        label: entry.label,
+        target: entry.target,
+        icon: entry.icon,
+        iconSource: ""
+      })
+    }
+  }
+
+  // What the rows are told about themselves, read back after the view is done.
+  property string seen: ""
+
+  ListView {
+    id: listView
+    anchors.fill: parent
+    model: harness.listModel
+    delegate: C.BookmarkItem {
+      required property int index
+      required property string entryId
+      required property string type
+      required property string label
+      required property string target
+      required property string icon
+      required property string iconSource
+
+      width: ListView.view.width
+    }
+  }
+
+  Component.onCompleted: {
+    rebuild(harness.list)
+  }
+
+  Timer {
+    running: true
+    interval: 600
+    onTriggered: {
+      var rows = []
+      for (var i = 0; i < listView.count; i++) {
+        var d = listView.itemAtIndex(i)
+        if (!d) { rows.push("row" + i + "=missing"); continue }
+        rows.push("row" + i + "=" + (d.label !== "" ? "ok" : "emptyLabel"))
+      }
+      console.log("ROWS count=" + listView.count + " " + rows.join(" "))
+      Qt.callLater(Qt.quit)
+    }
+  }
+}
+QML
+
+out="$(run_scene)"
+rows="$(printf '%s' "$out" | sed -n 's/.*ROWS //p')"
+if [[ -z "$rows" ]]; then
+  bad "the delegate harness reported nothing"
+  printf '%s\n' "$out" | grep -vE "$noise" | tail -8
+else
+  printf '%s\n' "$rows" | grep -oE 'count=[0-9]+' | grep -q "count=3" \
+    && pass "the view holds every row" \
+    || bad "the view holds $(printf '%s' "$rows" | grep -oE 'count=[0-9]+')"
+  printf '%s' "$rows" | grep -q "emptyLabel" \
+    && bad "a delegate was created without its label" \
+    || pass "every delegate got its label"
+  printf '%s' "$rows" | grep -q "row[0-9]=missing" \
+    && bad "a row has no delegate at all" \
+    || pass "no row is left undelegated"
+fi
+
+# The warning is the failure mode, so it is asserted directly rather than
+# inferred from the rows.
+if printf '%s' "$out" | grep -q "Required property"; then
+  bad "no delegate complained about an uninitialised property"
+  printf '%s' "$out" | grep -oE '[^ ]*Required property[^"]*' | head -3
+else
+  pass "no delegate complained about an uninitialised property"
+fi
+
 head_ "the add/edit form, driven without a mouse"
 cat > "$WORK/shell.qml" <<'QML'
 import QtQuick
