@@ -305,11 +305,18 @@ Item {
   function ping(): string { return "ok" }
   function dump(): string { return JSON.stringify(bookmarkList()) }
 
-  function ipcAdd(payloadJson: string): string {
+  // The names are the verbs themselves, because the host looks the method up
+  // by the name the caller passed. Naming these ipcAdd and the like made every
+  // scripted add and remove answer "unknown", and — worse — `update` happened
+  // to collide with something already on Item, which returned undefined and so
+  // was reported as "ok" without the row ever changing. A caller cannot tell
+  // that apart from a real success, which is why the smoke test now checks the
+  // documented verbs against the functions actually defined here.
+  function add(payloadJson: string): string {
     return addEntry(parsePayload(payloadJson)) ? "ok" : "invalid"
   }
 
-  function ipcUpdate(payloadJson: string): string {
+  function update(payloadJson: string): string {
     var payload = parsePayload(payloadJson)
     if (!Object.prototype.hasOwnProperty.call(payload, "index")) return "invalid"
     var row = rowFrom(payload.index)
@@ -318,10 +325,19 @@ Item {
     return updateEntry(row, payload) ? "ok" : "unknown"
   }
 
-  function ipcRemove(rowJson: string): string {
+  function remove(rowJson: string): string {
     var row = rowFrom(rowJson)
     if (row < 0) return "invalid"
     return removeEntry(row) ? "ok" : "unknown"
+  }
+
+  function launch(payloadJson: string): string {
+    var payload = parsePayload(payloadJson)
+    if (!Object.prototype.hasOwnProperty.call(payload, "index")) return "invalid"
+    var row = rowFrom(payload.index)
+    if (row < 0) return "invalid"
+    launchEntry(row)
+    return "ok"
   }
 
   // Same four verbs, reached by the plugin's own IPC target for callers that
@@ -331,9 +347,10 @@ Item {
     target: "bookmarks"
     function ping(): string { return root.ping() }
     function dump(): string { return root.dump() }
-    function add(payloadJson: string): string { return root.ipcAdd(payloadJson) }
-    function update(payloadJson: string): string { return root.ipcUpdate(payloadJson) }
-    function remove(rowJson: string): string { return root.ipcRemove(rowJson) }
+    function add(payloadJson: string): string { return root.add(payloadJson) }
+    function update(payloadJson: string): string { return root.update(payloadJson) }
+    function remove(rowJson: string): string { return root.remove(rowJson) }
+    function launch(payloadJson: string): string { return root.launch(payloadJson) }
     function open(): string { root.open(); return "ok" }
     function close(): string { root.close(); return "ok" }
     function toggle(): string { root.opened ? root.close() : root.open(); return "ok" }

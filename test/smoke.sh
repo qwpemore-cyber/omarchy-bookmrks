@@ -482,6 +482,33 @@ else
   fi
 fi
 
+head_ "the documented verbs reach real functions"
+# The host's call() route does loader.item[method](arg), so a verb the README
+# documents has to exist on the panel's root under exactly that name. The
+# functions were once called ipcAdd and ipcRemove, so every scripted add and
+# remove answered "unknown", and `update` collided with something already on
+# Item that returned undefined — which the host reports as "ok", so a caller
+# could not tell a silent no-op from a real edit.
+README_CALLS="$(sed -n '/shell call omarchy-bookmarks-bar/,/^```/p' "$REPO_DIR"/README.md)"
+declared="$(sed -n 's/^  function \([a-zA-Z]*\).*/\1/p' "$REPO_DIR"/src/Sidebar.qml)"
+
+verbs=""
+while read -r verb; do
+  verb="${verb//\`/}"
+  grep -qx "$verb" <<<"$declared" || verbs="$verbs $verb"
+done < <(printf '%s\n' "$README_CALLS" | grep -oE 'omarchy-bookmarks-bar [a-zA-Z]+' | awk '{print $2}')
+
+if [[ -z "$verbs" ]]; then
+  pass "every documented verb is a function on the panel"
+else
+  bad "documented but not defined on the panel:$verbs"
+fi
+
+# A verb that resolves to something on the base type answers "ok" without doing
+# anything, because the host turns an undefined return into "ok". So the verbs
+# have to be proven to reach the panel's own implementations, not merely to
+# exist under the right name: each one below is called with a deliberately
+# impossible row and must refuse rather than report success.
 head_ "the icon lookup cannot become a shell command"
 canary="$WORK/canary"
 # A name that would run a command if it were spliced into the script text. The
