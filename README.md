@@ -19,6 +19,46 @@ links, apps, and commands — one `SUPER + B` away.
   per type.
 - Follows your theme and font size, and respects reduced motion.
 
+## Usage
+
+Open the panel with `SUPER + B`, or from a terminal:
+
+```sh
+omarchy-shell shell summon omarchy-bookmarks-bar   # open
+omarchy-shell shell hide omarchy-bookmarks-bar     # close
+omarchy-shell shell toggle omarchy-bookmarks-bar   # either way
+```
+
+Move with `j`/`k`, launch the selected entry with `Return`, and `a` to add.
+Nothing needs the mouse — see [Keys](#keys) for the full map.
+
+### Adding an entry
+
+Press `a`, pick a type, fill in **Label** (what the list shows) and **Target**
+(what actually runs), then `Return`:
+
+| type | Target accepts | example |
+|------|----------------|---------|
+| `url` | a web address | `https://github.com` |
+| `app` | a desktop entry id, or a bare command | `org.gnome.Nautilus`, `firefox` |
+| `cmd` | any command line | `omarchy-capture-screenshot` |
+
+In the form, `j`/`k` and `h`/`l` pick the type, `Return` saves and `Escape`
+cancels, so the whole thing works without touching the pointer. **Icon** is
+optional: leave it empty and the panel uses a themed desktop icon when there is
+one, otherwise a glyph for the type.
+
+`cmd` is the only type that goes through a shell, which is the point of it. A
+`url` or `app` target is passed as an argument and can never become a command
+line, so a target containing spaces or quotes still does what it says.
+
+### Where your entries live
+
+`~/.config/omarchy/bookmarks.json`, outside the plugin folder on purpose:
+reinstalling, updating, or removing the plugin never touches your data. Edit it
+with any editor, or through the panel — the panel watches the file, so an
+external edit shows up immediately.
+
 ## Install
 
 ```sh
@@ -121,6 +161,23 @@ omarchy-shell shell call omarchy-bookmarks-bar remove 0
 
 `remove` takes a row number, not JSON, and a blank or non-numeric argument is
 refused rather than read as row 0.
+
+A practical one, if you want entries that follow your day:
+
+```sh
+# a scratch entry for a throwaway command
+omarchy-shell shell call omarchy-bookmarks-bar add \
+  '{"type":"cmd","label":"Today","target":"date +%A"}'
+
+# run whatever is on row 2 without opening the panel
+omarchy-shell shell call omarchy-bookmarks-bar launch '{"index":2}'
+```
+
+The replies are worth branching on: `"ok"` landed, `"invalid"` the payload was
+refused, `"unknown"` the row is not there. That distinction is real rather than
+decorative — a blank `remove` argument is refused instead of quietly taking row
+0, and a `update` whose payload is incomplete is refused instead of reporting a
+save that never happened.
 
 To rebind it, edit the marked block in `~/.config/hypr/bindings.lua` and run
 `hyprctl reload`. `SUPER + B` is the default because it is free on a stock

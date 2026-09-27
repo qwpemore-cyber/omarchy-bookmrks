@@ -509,6 +509,56 @@ fi
 # have to be proven to reach the panel's own implementations, not merely to
 # exist under the right name: each one below is called with a deliberately
 # impossible row and must refuse rather than report success.
+head_ "the usage guide is true"
+# A README that documents a verb nobody defined is how the last two rounds of
+# bugs shipped, so the guide is checked against the code it describes. This
+# only catches drift in what is written down; it is not a substitute for
+# running the commands, which is what found the missing argument.
+usage="$(sed -n '/^## Usage/,/^## Install/p' "$REPO_DIR"/README.md)"
+shell_cmds="$(sed -n '/omarchy-shell shell /p' "$REPO_DIR"/README.md)"
+
+# Every shell function the guide tells a reader to run must be one the host
+# actually exports, checked against the shell's own source rather than a list
+# written here, which would only ever agree with itself.
+host_fns="$(sed -n '/IpcHandler {/,/^  }$/p' /usr/share/omarchy/shell/shell.qml \
+            | grep -oE 'function [a-zA-Z]+' | sed 's/function //' | sort -u)"
+unknown=""
+while read -r fn; do
+  [[ -z "$fn" ]] && continue
+  grep -qx "$fn" <<<"$host_fns" || unknown="$unknown $fn"
+done < <(grep -oE 'omarchy-shell shell [a-zA-Z]+' <<<"$shell_cmds" | awk '{print $3}' | sort -u)
+
+if [[ -z "$unknown" ]]; then
+  pass "every shell command in the guide calls a function the host exports"
+else
+  bad "documented but not exported by the host:$unknown"
+fi
+
+# The three types in the guide have to be the three the model accepts, or the
+# table is advertising a type that cannot be saved.
+types_in_guide="$(sed -n '/^| type | Target accepts |/,/^$/p' <<<"$usage" \
+                 | grep -oE '^\| `[a-z]+`' | tr -d '|` ' | sort -u)"
+types_in_model="$(cd "$REPO_DIR" && node -e '
+  const src = require("fs").readFileSync("src/BookmarkModel.js", "utf8");
+  const m = src.match(/var TYPES = \[([^\]]+)\]/);
+  if (!m) { console.error("TYPES not found"); process.exit(1); }
+  process.stdout.write([...m[1].matchAll(/"([a-z]+)"/g)].map(x => x[1]).sort().join(" "));
+')"
+if [[ "$(tr '\n' ' ' <<<"$types_in_guide" | xargs)" == "$(echo "$types_in_model" | xargs)" ]]; then
+  pass "the guide lists exactly the types the model accepts"
+else
+  bad "the guide says [$types_in_guide], the model accepts [$types_in_model]"
+fi
+
+# The guide must not tell a reader to press a key the panel does not handle.
+guide_keys="$(sed -n '/^## Keys/,/^## How/p' "$REPO_DIR"/README.md)"
+declared_keys="$(sed -n '/function keyIntent/,/^  }$/p' "$REPO_DIR"/src/Sidebar.qml \
+                | grep -oE '"[a-zA-Z]"' | tr -d '"' | sort -u)"
+for k in a J K; do
+  grep -q "$k" <<<"$declared_keys" || bad "the guide documents $k, the panel has no $k intent"
+done
+grep -q . <<<"$declared_keys" && pass "the guide's letter keys are the panel's letter keys"
+
 head_ "the icon lookup cannot become a shell command"
 canary="$WORK/canary"
 # A name that would run a command if it were spliced into the script text. The
