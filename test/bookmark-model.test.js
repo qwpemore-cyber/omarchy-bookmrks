@@ -1,6 +1,6 @@
 const fs = require("fs");
 const src = fs.readFileSync(require("path").join(__dirname, "..", "src", "BookmarkModel.js"), "utf8");
-const M = new Function(src + "\nreturn {parse,serialize,append,updateAt,removeAt,moveBy,argvFor,iconKind,labelFor,makeId,isIconGlyph,isDesktopId,isSeparatorGlyph,labelForType,TYPE_GLYPHS,typeGlyph,lineHeightFor};")();
+  const M = new Function(src + "\nreturn {parse,serialize,append,updateAt,removeAt,moveBy,argvFor,iconKind,labelFor,makeId,isIconGlyph,isDesktopId,isSeparatorGlyph,labelForType,TYPE_GLYPHS,typeGlyph,lineHeightFor,isFileTarget,expandHome,fileLabel,TYPES,isSupportedType};")();
 
 const GLYPH = String.fromCodePoint(0x0F488);   // Browser, from stock omarchy menu
 const APPGLYPH = String.fromCodePoint(0xF003B); // Apps
@@ -155,5 +155,71 @@ eq("a proportional multiplier would overshoot", M.lineHeightFor(Math.round(12 * 
 eq("the leading asked for is the leading delivered",
    M.lineHeightFor(Math.round(12 * 1.3), 16) * 16, Math.round(12 * 1.3));
 
-console.log("\n" + pass + " passed, " + fail + " failed");
-process.exit(fail ? 1 : 0);
+  // --- type: file --------------------------------------------------------
+  // The whole point of the type is "click and the thing opens", so the target
+  // has to survive a path with spaces in it, a path that is not there right
+  // now, and a move to a machine with a different user name.
+  eq("file is a supported type", M.isSupportedType("file"), true);
+  eq("file is in TYPES", M.TYPES.indexOf("file") !== -1, true);
+  eq("file glyph in PUA", M.isIconGlyph(M.TYPE_GLYPHS.file), true);
+  eq("file glyph is one codepoint", Array.from(M.TYPE_GLYPHS.file).length, 1);
+
+  eq("absolute file target accepted", M.isFileTarget("/home/bo/a.md"), true);
+  eq("home-relative file target accepted", M.isFileTarget("~/a.md"), true);
+  eq("bare tilde accepted", M.isFileTarget("~"), true);
+  // A relative path would resolve against whatever directory the panel was
+  // started in, so the same bookmark could open a different file per launch.
+  eq("relative file target refused", M.isFileTarget("a.md"), false);
+  eq("dot-relative file target refused", M.isFileTarget("./a.md"), false);
+  eq("parent-relative file target refused", M.isFileTarget("../a.md"), false);
+  eq("a file URL is not a path", M.isFileTarget("file:///home/bo/a.md"), false);
+
+  eq("a relative file bookmark is dropped",
+     M.parse('[{"type":"file","target":"notes.md"}]').bookmarks.length, 0);
+  eq("an absolute one is kept",
+     M.parse('[{"type":"file","target":"/tmp/notes.md"}]').bookmarks.length, 1);
+  // The whole reason a file bookmark survives a new laptop: existence is not
+  // checked when loading, so a path on a drive that is not mounted right now
+  // is still a bookmark and comes back when the drive is there.
+  eq("a missing file is not dropped",
+     M.parse('[{"type":"file","target":"/nope/never.md"}]').bookmarks.length, 1);
+
+  eq("file argv is xdg-open", M.argvFor({type: "file", target: "/tmp/a.md"}), ["xdg-open", "/tmp/a.md"]);
+  // argv form, so the shell never sees it: a path with a substitution in it
+  // must arrive as one literal argument.
+  eq("file argv keeps spaces intact",
+     M.argvFor({type: "file", target: "/tmp/My Notes/a.md"}), ["xdg-open", "/tmp/My Notes/a.md"]);
+  eq("file argv does not expand shell syntax",
+     M.argvFor({type: "file", target: "/tmp/$(rm -rf ~).md"}), ["xdg-open", "/tmp/$(rm -rf ~).md"]);
+  eq("directory uses the same call", M.argvFor({type: "file", target: "/home/bo/code"}),
+     ["xdg-open", "/home/bo/code"]);
+
+  eq("~ expands at launch", M.argvFor({type: "file", target: "~/a.md"}, "/home/bo"),
+     ["xdg-open", "/home/bo/a.md"]);
+  eq("~ expands under a different user name", M.argvFor({type: "file", target: "~/a.md"}, "/home/someone-else"),
+     ["xdg-open", "/home/someone-else/a.md"]);
+  eq("bare ~ expands to the home directory", M.expandHome("~", "/home/bo"), "/home/bo");
+  eq("a trailing slash on home does not double up", M.expandHome("~/a", "/home/bo/"), "/home/bo/a");
+  eq("an absolute path ignores home", M.expandHome("/etc/a", "/home/bo"), "/etc/a");
+  // Without a home to expand into, the tilde is left alone rather than guessed
+  // at: "~/a.md" is not "/a.md" and is certainly not "a.md".
+  eq("no home leaves the tilde alone", M.expandHome("~/a.md", ""), "~/a.md");
+  eq("no home leaves bare tilde alone", M.expandHome("~", ""), "~");
+  eq("~ survives a save/load round trip",
+     M.parse(M.serialize({version: 1, bookmarks: [{type: "file", target: "~/a.md"}]}))
+       .bookmarks[0].target, "~/a.md");
+
+  // The label is the last path segment, taken from the whole string: splitting
+  // on whitespace first would reduce "/home/bo/My Notes/a.md" to "My".
+  eq("file label is the basename", M.fileLabel("/home/bo/a.md"), "a.md");
+  eq("file label keeps spaces", M.fileLabel("/home/bo/My Notes/a.md"), "a.md");
+  eq("file label from a bare name", M.fileLabel("a.md"), "a.md");
+  eq("directory label is its own name", M.fileLabel("/home/bo/code"), "code");
+  eq("trailing slash names the directory", M.fileLabel("/home/bo/code/"), "code");
+  eq("root is not an empty label", M.fileLabel("/") !== "", true);
+  eq("a tilde path labels by name", M.labelForType("file", "~/.bashrc"), ".bashrc");
+  eq("url labels still strip the scheme", M.labelForType("url", "https://a.com/x"), "a.com");
+  eq("cmd labels still take the first word", M.labelForType("cmd", "python3 s.py"), "python3");
+
+  console.log("\n" + pass + " passed, " + fail + " failed");
+  process.exit(fail ? 1 : 0);

@@ -14,7 +14,7 @@
 // front of the UI.
 
 var VERSION = 1
-var TYPES = ["url", "app", "cmd"]
+var TYPES = ["url", "app", "cmd", "file"]
 
 // Glyphs used when a bookmark carries no icon, and for the modal's type
 // selector. These are the same codepoints the stock Omarchy menu uses for
@@ -22,10 +22,18 @@ var TYPES = ["url", "app", "cmd"]
 // Nerd Font this desktop already ships. Built with fromCodePoint because
 // Material Design Icons codepoints run past U+FFFF, where a \uXXXX escape
 // silently stops after four hex digits.
+//
+// None of them are in omarchy.ttf; they are all in the JetBrainsMono Nerd Font
+// that `fc-match monospace` resolves to, and reach it through the fallback
+// chain. That is why the panel says `Style.font.family` is plain "monospace"
+// yet the glyphs still draw. Every candidate here was checked against the
+// font's cmap rather than assumed, since a codepoint that is not in the font
+// renders as a box and nothing else reports it.
 var TYPE_GLYPHS = {
   url: String.fromCodePoint(0x0F488),
   app: String.fromCodePoint(0xF003B),
   cmd: String.fromCodePoint(0x0F489),
+  file: String.fromCodePoint(0x0F15B),
   separator: "."
 }
 
@@ -82,6 +90,24 @@ function makeId() {
   return "b" + stamp + salt
 }
 
+// A file label is the last path segment, and the whole trimmed string is the
+// path: splitting on whitespace first would cut "/home/bo/My Notes/a.md" down
+// to "My". The `~` is dropped so the label reads as a name, not as a shell
+// token the user has to expand.
+function fileLabel(target) {
+  var text = String(target === undefined || target === null ? "" : target).trim()
+  if (text === "") return ""
+  var cut = text.lastIndexOf("/")
+  var name = cut === -1 ? text : text.slice(cut + 1)
+  if (name === "") {
+    // A trailing slash names the directory above it, not nothing.
+    var parent = text.slice(0, cut).replace(/\/+$/, "")
+    var up = parent.lastIndexOf("/")
+    name = up === -1 ? parent : parent.slice(up + 1)
+  }
+  return name || text
+}
+
 function labelForType(type, target) {
   var text = String(target === undefined || target === null ? "" : target).trim()
   if (text === "") return ""
@@ -91,12 +117,33 @@ function labelForType(type, target) {
     if (cut !== -1) withoutScheme = withoutScheme.slice(0, cut)
     return withoutScheme || text
   }
+  if (isSupportedType(type) && type === "file") return fileLabel(text)
   // A command line is mostly flags and paths; the first word is the useful
   // label, and the desktop id is the executable in a shell command too.
   var first = text.split(/\s+/)[0]
   var slash = first.lastIndexOf("/")
   if (slash !== -1) first = first.slice(slash + 1)
   return first || text
+}
+
+// A bare relative path is refused: it would resolve against whatever directory
+// the panel happened to be started in, so the same bookmark could open two
+// different files depending on how the session was launched. `~` is allowed and
+// stored unexpanded, which is what makes a file bookmark survive a move to
+// another machine — the home directory is expanded at launch, not on disk, so
+// `/home/bo/notes.md` never has to be edited to work as `/home/someone-else`.
+function isFileTarget(value) {
+  var text = String(value)
+  return text === "~" || text.indexOf("~/") === 0 || text.charAt(0) === "/"
+}
+
+function expandHome(path, home) {
+  var text = String(path === undefined || path === null ? "" : path)
+  var root = String(home === undefined || home === null ? "" : home)
+  if (text !== "~" && text.indexOf("~/") !== 0) return text
+  if (root === "") return text
+  if (root.charAt(root.length - 1) === "/") root = root.slice(0, -1)
+  return text === "~" ? root : root + text.slice(1)
 }
 
 function normalizeEntry(raw) {
@@ -107,6 +154,7 @@ function normalizeEntry(raw) {
 
   var target = String(raw.target === undefined || raw.target === null ? "" : raw.target).trim()
   if (target === "") return null
+  if (type === "file" && !isFileTarget(target)) return null
 
   var icon = String(raw.icon === undefined || raw.icon === null ? "" : raw.icon).trim()
   // A glyph only makes sense as an icon; in the target field it is far more
@@ -193,13 +241,21 @@ function moveBy(state, from, delta) {
 
 // A target typed by a person, or edited by one, is never handed to a shell
 // as a command line: argv form means the string can only ever be a single
-// argument, whatever it contains.
-function argvFor(entry) {
+// argument, whatever it contains. `home` is passed in rather than read from the
+// environment so this stays a pure function, and so a file bookmark written on
+// one machine finds the same file under a different user name on the next one.
+function argvFor(entry, home) {
   var normalized = normalizeEntry(entry)
   if (!normalized) return []
 
   if (normalized.type === "url") {
     return ["omarchy-launch-webapp", normalized.target]
+  }
+  if (normalized.type === "file") {
+    // xdg-open hands the path to whatever application the user already
+    // registered for that type, which is what "open this file" should mean on
+    // a desktop. Directories work through the same call.
+    return ["xdg-open", expandHome(normalized.target, home)]
   }
   if (normalized.type === "app") {
     // A desktop id is launched by its .desktop file, which carries the

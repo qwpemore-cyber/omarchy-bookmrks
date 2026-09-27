@@ -85,8 +85,9 @@ Item {
 
   // ---- data ----------------------------------------------------------------
 
-  readonly property string dataPath: Quickshell.env("HOME") + "/.config/omarchy/bookmarks.json"
-  readonly property string dataDir: Quickshell.env("HOME") + "/.config/omarchy"
+  readonly property string homeDir: Quickshell.env("HOME")
+  readonly property string dataPath: homeDir + "/.config/omarchy/bookmarks.json"
+  readonly property string dataDir: homeDir + "/.config/omarchy"
 
   // Desktop id -> file:// URL. An empty string is a real answer ("looked,
   // this system has no such icon"), which is why it is cached too: without
@@ -183,14 +184,18 @@ Item {
     return true
   }
 
-  function launchEntry(row) {
-    var argv = Model.argvFor(entryAt(row))
-    if (argv.length === 0) return
-    // A cmd bookmark is the user's own command line, so it goes through a
-    // shell deliberately. url and app targets are data and stay argv-only.
-    if (argv[0] === "bash") Util.execDetached(argv[2])
-    else Util.execArgv(argv)
-  }
+    function launchEntry(row) {
+      // homeDir is passed in so a "~" written in the data file is expanded here,
+      // at launch, rather than being flattened to one machine's home directory
+      // when the bookmark was saved.
+      var argv = Model.argvFor(entryAt(row), root.homeDir)
+      if (argv.length === 0) return
+      // A cmd bookmark is the user's own command line, so it goes through a
+      // shell deliberately. url, app and file targets are data and stay
+      // argv-only, so a path containing ";" or "$(...)" is just a path.
+      if (argv[0] === "bash") Util.execDetached(argv[2])
+      else Util.execArgv(argv)
+    }
 
   // ---- icon lookup ---------------------------------------------------------
 
