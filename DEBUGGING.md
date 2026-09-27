@@ -73,4 +73,7 @@ comes back:
   nothing.
 - **A documented verb is a verb that exists.** The README is compared against
   the source, in both directions.
+| an export produced an empty or missing file | `setText` right after setting `path`; the write is async and has to be waited on with `onFileChanged` |
+| importing wiped the list | a file that failed the `looksLikeOurFile()` check was read as zero bookmarks, then replaced |
+| the filter deletes the wrong bookmark | an action addressed the view row instead of `fullRowFor(viewRow)` |
 | the desktop is unusable while the panel is open | `WlrLayershell.keyboardFocus` in `Sidebar.qml` | `keyboardFocus: opened && !root.overlayOpen` |
