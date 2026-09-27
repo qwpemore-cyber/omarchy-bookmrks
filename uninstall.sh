@@ -23,8 +23,10 @@ BINDINGS="$HOME/.config/hypr/bindings.lua"
 MANIFEST="$REPO_DIR/manifest.json"
 PLUGIN_ID="$(jq -r '.id // ""' "$MANIFEST" 2>/dev/null || true)"
 
-BIND_BEGIN="# >>> ${PLUGIN_ID:-bookmarks-bar} >>>"
-BIND_END="# <<< ${PLUGIN_ID:-bookmarks-bar} <<<"
+# Lua comments, so `--` and not `#`: a stray `#` here would make hyprland
+# reject the entire config and take every keybinding down with it.
+BIND_BEGIN="-- >>> ${PLUGIN_ID:-bookmarks-bar} >>>"
+BIND_END="-- <<< ${PLUGIN_ID:-bookmarks-bar} <<<"
 
 PURGE=0
 ASSUME_YES=0
@@ -62,7 +64,7 @@ info "id  $PLUGIN_ID"
 
 # ---------------------------------------------------------------- keybinding
 
-if [[ -f "$BINDINGS" ]] && grep -qxF "$BIND_BEGIN" "$BINDINGS" 2>/dev/null; then
+if [[ -f "$BINDINGS" ]] && grep -qxF -- "$BIND_BEGIN" "$BINDINGS" 2>/dev/null; then
   tmp="$(mktemp)"
   # Drop the block, then any trailing blank lines it left behind, so a file
   # this script has touched once comes back byte-for-byte.

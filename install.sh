@@ -30,8 +30,12 @@ BINDINGS="$HOME/.config/hypr/bindings.lua"
 MANIFEST="$REPO_DIR/manifest.json"
 PLUGIN_ID="$(jq -r '.id // ""' "$MANIFEST" 2>/dev/null || true)"
 
-BIND_BEGIN="# >>> ${PLUGIN_ID:-bookmarks-bar} >>>"
-BIND_END="# <<< ${PLUGIN_ID:-bookmarks-bar} <<<"
+# The marker lines are Lua comments, so they must start with `--`. A `#` here
+# is a syntax error, and a syntax error in bindings.lua takes down the whole
+# Hyprland config — which is why they are written this way and why the write is
+# verified afterwards.
+BIND_BEGIN="-- >>> ${PLUGIN_ID:-bookmarks-bar} >>>"
+BIND_END="-- <<< ${PLUGIN_ID:-bookmarks-bar} <<<"
 BIND_KEY="SUPER + B"
 
 MODE="local"
@@ -162,16 +166,33 @@ if (( ADD_KEYBIND )); then
       printf '%s\n' "$BIND_END"
     } >"$updated"
 
+    # Keep the pre-edit file so a config that turns out to be unparseable can
+    # be put back exactly as it was.
+    cp "$BINDINGS" "$updated.pre"
+
     if cmp -s "$updated" "$BINDINGS"; then
       info "keybinding already present"
     else
       # Write through the original inode so its mode and ownership survive;
       # replacing the file with a mktemp one would not.
       cat "$updated" >"$BINDINGS"
-      hyprctl reload >/dev/null 2>&1 || warn "hyprctl reload failed; bindings apply on next login"
-      info "bound $BIND_KEY to toggle the sidebar"
+
+      # Verify the config still loads. A broken bindings.lua is not a cosmetic
+      # problem — hyprland refuses the whole config and the user loses every
+      # keybinding on the machine — so undo the write if it does not parse.
+      if command -v hyprctl >/dev/null 2>&1; then
+        if [[ "$(hyprctl reload 2>&1)" == "ok" ]]; then
+          info "bound $BIND_KEY to toggle the sidebar"
+        else
+          cp "$updated.pre" "$BINDINGS" 2>/dev/null || true
+          hyprctl reload >/dev/null 2>&1 || true
+          die "the new bindings.lua did not load; the original was restored"
+        fi
+      else
+        info "bound $BIND_KEY to toggle the sidebar"
+      fi
     fi
-    rm -f "$stripped" "$updated"
+    rm -f "$stripped" "$updated" "$updated.pre"
   fi
 fi
 

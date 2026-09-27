@@ -48,10 +48,15 @@ The installer also seeds `~/.config/omarchy/bookmarks.json` from
 `~/.config/hypr/bindings.lua`:
 
 ```lua
-# >>> omarchy-bookmarks-bar >>>
+-- >>> omarchy-bookmarks-bar >>>
 o.bind("SUPER + B", "Bookmarks bar", "omarchy-shell shell toggle omarchy-bookmarks-bar")
-# <<< omarchy-bookmarks-bar <<<
+-- <<< omarchy-bookmarks-bar <<<
 ```
+
+`bindings.lua` is Lua, so those markers are `--` comments and not `#`. The
+installer reloads Hyprland after writing and puts the file back the way it was
+if the new config does not parse, so a bad edit can never leave you without
+keybindings.
 
 ## Uninstall
 
