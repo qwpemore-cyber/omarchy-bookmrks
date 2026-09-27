@@ -78,10 +78,16 @@ Item {
       // Nerd-font glyph, used for the type and for any bookmark whose icon
       // is a glyph rather than a desktop id. Sized off the row height so it
       // stays optically centred whatever the theme's spacing scale is.
+      // A resolved app icon is opaque enough to sit on top, but a symbolic or
+      // transparent one would let the type glyph show through it, so the glyph
+      // steps aside only once the image has actually decoded. Until then — and
+      // if the file is missing — it is the fallback, which is the point of it.
       Text {
+        id: glyph
         anchors.centerIn: parent
         width: parent.width
         height: parent.height
+        visible: !root.showsAppIcon || iconImage.status !== Image.Ready
         text: Model.typeGlyph(root.type)
         textFormat: Text.PlainText
         font.family: Style.font.family
@@ -92,6 +98,7 @@ Item {
       }
 
       Image {
+        id: iconImage
         anchors.centerIn: parent
         width: root.iconSize
         height: width

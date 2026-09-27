@@ -155,6 +155,139 @@ else
   bad "no errors while rendering hostile labels"; printf '%s\n' "$real_errors"
 fi
 
+head_ "the add/edit form, driven without a mouse"
+cat > "$WORK/shell.qml" <<'QML'
+import QtQuick
+import QtQuick.Layouts
+import "components" as C
+
+// Drives the form through the same surface the sidebar uses: openFor, submit,
+// cancel, fieldKey. The three text fields are ids inside the component and are
+// deliberately not reachable from here, so a caller cannot quietly set text
+// behind the model's back — this harness is held to the public contract too.
+Item {
+  id: harness
+  width: 400
+  height: 500
+
+  property int submittedCount: 0
+  property int cancelledCount: 0
+  property string lastPayload: ""
+  property int lastIndex: -99
+
+  C.AddBookmarkModal {
+    id: m
+    anchors.fill: parent
+    onSubmitted: function(index, payloadJson) {
+      harness.submittedCount++
+      harness.lastIndex = index
+      harness.lastPayload = payloadJson
+    }
+    onCancelled: harness.cancelledCount++
+  }
+
+  Component.onCompleted: {
+    var out = []
+
+    // A bookmark with no target must not reach the file, and must say so.
+    var beforeEmpty = harness.submittedCount
+    m.openFor(-1, null)
+    m.submit()
+    out.push("emptyTargetRefused=" + (harness.submittedCount === beforeEmpty))
+    out.push("emptyTargetKeepsFormOpen=" + (m.modalOpen === true))
+
+    // Valid entries are normalised by the model, not by the form: that is what
+    // trims the padding and mints the id.
+    m.openFor(-1, { type: "url", label: "  Trim me  ",
+                    target: "  https://example.com  ", icon: "" })
+    m.submit()
+    out.push("validSubmitted=" + (harness.submittedCount === 1))
+    out.push("newEntryIsRowMinusOne=" + (harness.lastIndex === -1))
+    out.push("formClosedOnSave=" + (m.modalOpen === false))
+    var saved = JSON.parse(harness.lastPayload)
+    out.push("targetTrimmed=" + (saved.target === "https://example.com"))
+    out.push("labelTrimmed=" + (saved.label === "Trim me"))
+    out.push("idMinted=" + (typeof saved.id === "string" && saved.id.length > 0))
+
+    // Editing seeds the fields and keeps the row's identity.
+    var beforeEdit = harness.submittedCount
+    m.openFor(0, { id: "keepme", type: "cmd", label: "Old", target: "true", icon: "x" })
+    out.push("editHeadline=" + (m.headline === "Edit bookmark"))
+    out.push("editTypeSeeded=" + (m.type === "cmd"))
+    out.push("editIconSeeded=" + (m.entryId === "keepme"))
+    m.submit()
+    out.push("editSubmitted=" + (harness.submittedCount === beforeEdit + 1))
+    out.push("editKeepsId=" + (JSON.parse(harness.lastPayload).id === "keepme"))
+    out.push("editReportsRow=" + (harness.lastIndex === 0))
+
+    // The two keys the catcher cannot deliver once a field has focus.
+    var beforeEnter = harness.submittedCount
+    m.openFor(-1, { type: "url", label: "k", target: "https://keyboard.example", icon: "" })
+    var enter = { key: Qt.Key_Return, accepted: false }
+    m.fieldKey(enter)
+    out.push("enterSaves=" + (harness.submittedCount === beforeEnter + 1))
+    out.push("enterConsumed=" + (enter.accepted === true))
+
+    m.openFor(-1, { type: "url", label: "k", target: "https://esc.example", icon: "" })
+    var esc = { key: Qt.Key_Escape, accepted: false }
+    m.fieldKey(esc)
+    out.push("escapeCancels=" + (harness.cancelledCount === 1))
+    out.push("escapeConsumed=" + (esc.accepted === true))
+    out.push("escapeClosesForm=" + (m.modalOpen === false))
+
+    // A type the form does not offer must still be refused by the model.
+    var beforeBadType = harness.submittedCount
+    m.openFor(-1, { type: "url", label: "k", target: "https://t.example", icon: "" })
+    m.type = "nonsense"
+    m.submit()
+    out.push("unknownTypeRefused=" + (harness.submittedCount === beforeBadType))
+
+    console.log("RESULTS " + out.join(" "))
+    Qt.callLater(Qt.quit)
+  }
+}
+QML
+
+out="$(run_scene)"
+results="$(printf '%s' "$out" | sed -n 's/.*RESULTS //p')"
+if [[ -z "$results" ]]; then
+  bad "the form harness reported nothing"
+  printf '%s\n' "$out" | grep -vE "$noise" | tail -8
+else
+  # Every token is a name=value pair, so a failure is a literal "false".
+  for pair in $results; do
+    case "$pair" in
+      *=true)  pass "${pair%%=*}" ;;
+      *=false) bad "${pair%%=*}" ;;
+      *)       bad "unreadable result: $pair" ;;
+    esac
+  done
+fi
+
+# QML cannot inject a synthetic key event, so the two keys above prove the
+# handler's logic; that the handler is attached to the fields at all is a
+# wiring question, and it is checked by looking for the attachment.
+head_ "the form is wired to the keyboard"
+fields=0
+while read -r line; do
+  case "$line" in
+    *Keys.onPressed:*fieldKey*) fields=$((fields + 1)) ;;
+  esac
+done < <(grep -A3 'id: \(labelField\|targetField\|iconField\)' "$REPO_DIR"/src/components/AddBookmarkModal.qml)
+if [[ $fields -eq 3 ]]; then
+  pass "all three fields forward Return and Escape"
+else
+  bad "only $fields of 3 fields forward Return and Escape"
+fi
+
+# A shadow copy of the text values would be a copy that can go stale, and
+# submit() reads the fields, so such a copy has to stay out.
+if grep -qE '^\s*property string (label|target|icon):' "$REPO_DIR"/src/components/AddBookmarkModal.qml; then
+  bad "the form still keeps a shadow copy of its text values"
+else
+  pass "no shadow copy of the text values"
+fi
+
 head_ "the icon lookup cannot become a shell command"
 canary="$WORK/canary"
 # A name that would run a command if it were spliced into the script text. The

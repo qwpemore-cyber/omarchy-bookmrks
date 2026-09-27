@@ -20,10 +20,18 @@ Item {
   readonly property bool editing: editIndex >= 0
   readonly property bool opened: modalOpen
 
+  // `type` is real state: the placeholder, the type buttons and cycleType all
+  // read it, and it has no visible field of its own. The three text values are
+  // not state here — they live in the fields, and submit() reads the fields
+  // directly, so a second copy would only be a copy that can go stale.
+  //
+  // The id is the exception: it is not typed, it is the identity of the row
+  // being edited. Dropping it would make submitted() carry a freshly minted id
+  // for an existing bookmark. updateAt currently overwrites it with the stored
+  // value, which hides the slip here, but the signal claims to hand over a
+  // whole entry and it would stop being one.
   property string type: "url"
-  property string label: ""
-  property string target: ""
-  property string icon: ""
+  property string entryId: ""
   readonly property string headline: editing ? "Edit bookmark" : "New bookmark"
 
   // Which of the two text fields the keyboard is currently in. The sidebar
@@ -44,25 +52,19 @@ Item {
     editIndex = index
     modalOpen = true
 
-    if (entry) {
-      type = entry.type || "url"
-      label = entry.label || ""
-      target = entry.target || ""
-      icon = entry.icon || ""
-    } else {
-      type = "url"
-      label = ""
-      target = ""
-      icon = ""
-    }
-
-    labelField.text = label
-    targetField.text = target
-    iconField.text = icon
+    var e = entry || {}
+    type = e.type || "url"
+    entryId = e.id || ""
+    labelField.text = e.label || ""
+    targetField.text = e.target || ""
+    iconField.text = e.icon || ""
     focusField = -1
 
     // Focus after the surface is mounted, otherwise the first click that
-    // opened the modal would immediately land in a field.
+    // opened the modal would immediately land in a field. The explicit
+    // focusField assignment is load-bearing: reopening the form while the
+    // target field still holds focus sends no activeFocusChanged, and the
+    // catcher would stay unblocked with the editor silently eating arrows.
     Qt.callLater(function() { targetField.forceActiveFocus(); focusField = 1 })
   }
 
@@ -78,14 +80,15 @@ Item {
 
     // Validate through the model rather than duplicating its rules here, so a
     // target the model would reject never reaches the saved file.
-    function submit() {
-      var normalized = Model.normalizeEntry({
-        type: root.type,
-        label: labelField.text,
-        target: targetField.text,
-        icon: iconField.text
-      })
-      if (!normalized) {
+  function submit() {
+    var normalized = Model.normalizeEntry({
+      id: root.entryId,
+      type: root.type,
+      label: labelField.text,
+      target: targetField.text,
+      icon: iconField.text
+    })
+    if (!normalized) {
       targetError.visible = true
       targetField.forceActiveFocus()
       focusField = 1
@@ -94,6 +97,22 @@ Item {
     targetError.visible = false
     close()
     submitted(root.editIndex, JSON.stringify(normalized))
+  }
+
+  // The catcher stands aside whenever a field has focus, which is the whole
+  // time the form is being used, so Return and Escape would never arrive
+  // anywhere: the editor ignores both, and the form could then only ever be
+  // saved or abandoned with a mouse. Every field forwards just these two.
+  function fieldKey(event) {
+    if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+      root.submit()
+      event.accepted = true
+      return
+    }
+    if (event.key === Qt.Key_Escape) {
+      root.cancel()
+      event.accepted = true
+    }
   }
 
   // Type switching only changes the hint; the target stays untouched so
@@ -124,7 +143,12 @@ Item {
     anchors.centerIn: parent
     width: Style.space(330)
     // A form with four rows of content must not outgrow a short screen.
-    height: Math.min(form.implicitHeight + Style.space(20) * 2, parent.height - Style.space(24))
+    // Clamped rather than plain Math.min: on a very short panel the
+    // second term goes negative, and a negative height is not a small
+    // form, it is a form that silently does not render.
+    height: Math.max(
+      Style.space(120),
+      Math.min(form.implicitHeight + Style.space(20) * 2, parent.height - Style.space(24)))
     color: Util.alpha(Color.popups.background, 0.97)
     borderSpec: Border.surfaceSpec("popups", "border", Color.popups.border, Math.max(1, Style.space(2)))
     radius: Style.cornerRadius
@@ -137,6 +161,10 @@ Item {
       onMoveRequested: function(dx, dy) { root.cycleType(dy) }
       onActivateRequested: root.submit()
       onCloseRequested: root.cancel()
+      // In the list this key deletes the selected bookmark. Here the only
+      // destructive action is the form's own, so it steps the type instead
+      // — and it only ever arrives with no field focused, i.e. before
+      // the first click lands in the form.
       onDeleteRequested: root.cycleType(-1)
     }
 
@@ -203,6 +231,8 @@ Item {
 
         TextField {
           id: labelField
+          Keys.priority: Keys.BeforeItem
+          Keys.onPressed: function(event) { root.fieldKey(event) }
           Layout.fillWidth: true
           placeholderText: "shown in the sidebar"
           onActiveFocusChanged: root.focusField = activeFocus ? 0 : -1
@@ -223,6 +253,8 @@ Item {
 
         TextField {
           id: targetField
+          Keys.priority: Keys.BeforeItem
+          Keys.onPressed: function(event) { root.fieldKey(event) }
           Layout.fillWidth: true
           placeholderText: root.type === "url" ? "https://example.com"
             : root.type === "app" ? "firefox or org.gnome.Nautilus"
@@ -255,6 +287,8 @@ Item {
 
         TextField {
           id: iconField
+          Keys.priority: Keys.BeforeItem
+          Keys.onPressed: function(event) { root.fieldKey(event) }
           Layout.fillWidth: true
           placeholderText: "optional: nerd-font glyph or desktop id"
           onActiveFocusChanged: root.focusField = activeFocus ? 2 : -1
