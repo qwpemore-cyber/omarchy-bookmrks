@@ -1,0 +1,2 @@
+# omarchy-bookmrks
+bookmarks 
