@@ -903,6 +903,144 @@ else
   done
 fi
 
+# Export and import are the two halves of moving a panel to another machine, and
+# both are the panel writing and reading a file it was handed a path to. The
+# question here is not "does the JSON round trip" -- the unit tests say that. It
+# is whether a save reaches the disk when its path was set one line earlier, and
+# whether a read of a file that is still being written comes back empty. A save
+# that quietly does nothing is an export that quietly loses everything.
+head_ "an export really writes, and an import really reads it back"
+export_a="$WORK/export-a.json"
+export_b="$WORK/export-b.json"
+rm -f "$export_a" "$export_b"
+
+# Both scenes wait by watching, not by polling with a timer: onFileChanged is the
+# same signal the panel's own data file uses, so a test that relied on a timer
+# would be testing a mechanism the plugin does not have.
+cat > "$WORK/shell.qml" <<QML
+import QtQuick
+import Quickshell.Io
+import "BookmarkModel.js" as Model
+
+Item {
+  width: 10
+  height: 10
+
+  // The view the panel exports through, pointed at a file that does not exist.
+  FileView {
+    id: exportFile
+    watchChanges: false
+    atomicWrites: true
+    printErrors: false
+  }
+
+  // A second view pointed at whatever was written, watching for the write to
+  // land. A read taken before the bytes are there would be reporting on the
+  // test's timing, not on the panel.
+  FileView {
+    id: importView
+    preload: true
+    watchChanges: true
+    atomicWrites: false
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      if (text().indexOf("My Notes/report.md") < 0) return
+      // Printed as one line and as a count, because the file is pretty-printed
+      // and a test that greps a multi-line read only ever sees its first brace.
+      console.log("ROUNDBACK " + Model.parse(text()).bookmarks.length + " "
+                  + text().indexOf("My Notes/report.md"))
+      Qt.callLater(Qt.quit)
+    }
+    onLoadFailed: Qt.callLater(Qt.quit)
+  }
+
+  Component.onCompleted: {
+    exportFile.path = "$export_a"
+    exportFile.setText(Model.serialize({ version: 1, bookmarks: [
+      { id: "a", type: "url", label: "GitHub", target: "https://github.com", icon: "" },
+      { id: "b", type: "file", label: "report", target: "/tmp/My Notes/report.md", icon: "" }
+    ] }))
+    importView.path = "$export_a"
+  }
+}
+QML
+
+out="$(run_scene)"
+back="$(printf '%s' "$out" | sed -n 's/.*ROUNDBACK //p')"
+if [[ -s "$export_a" ]]; then
+  pass "a save to a path that did not exist writes the file"
+else
+  bad "a save to a path that did not exist wrote nothing"
+fi
+if grep -q 'My Notes/report.md' "$export_a"; then
+  pass "the exported file holds the bookmark, spaces and all"
+else
+  bad "the exported file does not hold the bookmark"
+fi
+if grep -q '"version"' "$export_a"; then
+  pass "the exported file is the plugin's own format"
+else
+  bad "the exported file is not the plugin's own format"
+fi
+# Two bookmarks out, and the marker found somewhere in the text: read back
+# exactly what the export wrote. The index is compared as a number, because a
+# substring test on "-1" would be testing a hyphen, not a position.
+count="${back%% *}"
+at="${back##* }"
+if [[ "$count" == "2" ]] && [[ "$at" =~ ^[0-9]+$ ]] && (( at > 0 )); then
+  pass "an import reads back exactly what the export wrote"
+else
+  bad "an import did not read back the exported file (got: ${back:0:60})"
+fi
+
+# And a second export, to a second path: exporting on two different days must
+# produce two files, not one file overwritten in place.
+cat > "$WORK/shell.qml" <<QML
+import QtQuick
+import Quickshell.Io
+import "BookmarkModel.js" as Model
+
+Item {
+  width: 10
+  height: 10
+  FileView {
+    id: exportFile
+    watchChanges: false
+    atomicWrites: true
+    printErrors: false
+  }
+  FileView {
+    id: check
+    preload: true
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: { console.log("SECOND " + text()); Qt.callLater(Qt.quit) }
+    onLoadFailed: Qt.callLater(Qt.quit)
+  }
+  Component.onCompleted: {
+    exportFile.path = "$export_b"
+    exportFile.setText(Model.serialize({ version: 1, bookmarks: [
+      { id: "z", type: "cmd", label: "only", target: "pwd", icon: "" }
+    ] }))
+    check.path = "$export_b"
+  }
+}
+QML
+
+out="$(run_scene)"
+if [[ -s "$export_b" ]] && grep -q '"only"' "$export_b"; then
+  pass "a second export writes its own file"
+else
+  bad "a second export wrote nothing"
+fi
+if grep -q 'My Notes/report.md' "$export_a"; then
+  pass "the first export is still there afterwards"
+else
+  bad "the second export clobbered the first"
+fi
+
 # A search box that renumbers its own rows would turn "edit this" and "delete
 # this" into acts on the wrong bookmark, so the panel is checked for keeping the
 # saved list and the shown list apart: a filter hides rows without hiding them

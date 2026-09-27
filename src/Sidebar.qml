@@ -179,7 +179,37 @@ Item {
     bookmarkFile.setText(Model.serialize({ version: 1, bookmarks: list }))
   }
 
-  // ---- mutations -----------------------------------------------------------
+  // ---- import and export ---------------------------------------------------
+
+  // Export writes exactly what the file holds, so what leaves the machine and
+  // what stays on it cannot differ, including the order.
+  function exportTo(path) {
+    if (!path) return false
+    exportFile.path = path
+    exportFile.setText(Model.serialize({ version: 1, bookmarks: allEntries }))
+    return true
+  }
+
+  function replaceAll(entries) {
+    // A null here is the import refusing a file, not an empty file, and they
+    // must not look the same: "replace with nothing" is the one outcome that
+    // loses work.
+    if (!Array.isArray(entries)) return false
+    persist(entries)
+    rebuild(entries)
+    return true
+  }
+
+  function mergeImported(entries) {
+    if (!Array.isArray(entries)) return false
+    var merged = Model.mergeEntries({ version: 1, bookmarks: allEntries }, entries)
+    if (merged.length === allEntries.length) return false
+    persist(merged)
+    rebuild(merged)
+    return true
+  }
+
+
 
   function addEntry(payload) {
     var list = bookmarkList()
@@ -723,7 +753,25 @@ Item {
       anchors.fill: parent
       // The panel owns the path; the sheet is only told.
       dataPath: root.dataPath
+      today: root.today
       onClosed: keys.forceActiveFocus()
+      onExportRequested: function(path) {
+        settings.notice = root.exportTo(path)
+          ? "Exported to " + path
+          : "Export failed: no file was chosen."
+      }
+      onReplaceRequested: function(entries) {
+        settings.notice = root.replaceAll(entries)
+          ? "Replaced the list with the file's."
+          : "That file could not be read as a bookmark file, so nothing was changed."
+      }
+      onMergeRequested: function(entries) {
+        settings.notice = root.mergeImported(entries)
+          ? "Merged in anything this panel did not already have."
+          : entries === null
+            ? "That file could not be read as a bookmark file, so nothing was changed."
+            : "Nothing to add: every bookmark in that file is already here."
+      }
     }
   }
 
@@ -736,6 +784,17 @@ Item {
     id: ensureDir
     command: ["mkdir", "-p", root.dataDir]
     onExited: Qt.callLater(function() { bookmarkFile.reload() })
+  }
+
+  // A second view for writing somewhere else. A file view is bound to one path,
+  // so the export target cannot be the same object as the panel's own data:
+  // pointing that one at the export would move the panel's list out of its own
+  // file, and the next save would write the export back as the real data.
+  FileView {
+    id: exportFile
+    watchChanges: false
+    atomicWrites: true
+    printErrors: false
   }
 
   FileView {

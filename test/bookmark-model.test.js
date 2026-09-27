@@ -1,6 +1,6 @@
 const fs = require("fs");
 const src = fs.readFileSync(require("path").join(__dirname, "..", "src", "BookmarkModel.js"), "utf8");
-  const M = new Function(src + "\nreturn {parse,serialize,append,updateAt,removeAt,moveBy,argvFor,iconKind,labelFor,makeId,isIconGlyph,isDesktopId,isSeparatorGlyph,labelForType,TYPE_GLYPHS,typeGlyph,lineHeightFor,isFileTarget,expandHome,fileLabel,TYPES,isSupportedType,matches,filterIndexes,filterEntries};")();
+  const M = new Function(src + "\nreturn {parse,serialize,append,updateAt,removeAt,moveBy,argvFor,iconKind,labelFor,makeId,isIconGlyph,isDesktopId,isSeparatorGlyph,labelForType,TYPE_GLYPHS,typeGlyph,lineHeightFor,isFileTarget,expandHome,fileLabel,TYPES,isSupportedType,matches,filterIndexes,filterEntries,mergeEntries,looksLikeOurFile,exportName};")();
 
 const GLYPH = String.fromCodePoint(0x0F488);   // Browser, from stock omarchy menu
 const APPGLYPH = String.fromCodePoint(0xF003B); // Apps
@@ -261,6 +261,59 @@ eq("the leading asked for is the leading delivered",
   // The filtered list must be the same entries, in the same order, as the rows
   // they came from, or every index the view hands out points somewhere else.
   eq("filtered entries keep their ids", M.filterEntries(st, "t").map(function (e) { return e.id; }), ["a", "b", "c", "d"]);
+
+  // --- moving the panel to another machine -------------------------------
+  // The whole point of export and import: a file that can be copied to a new
+  // laptop and read back. A round trip has to be exact, and importing the same
+  // file twice must not double the list.
+  var one = { version: 1, bookmarks: lib };
+  eq("export round trips exactly", M.parse(M.serialize(one)).bookmarks, one.bookmarks);
+  eq("a file bookmark survives the trip", M.parse(M.serialize(one)).bookmarks[1].target, "/tmp/My Notes/report.md");
+  eq("a tilde is not rewritten on the way out",
+     M.parse(M.serialize({ version: 1, bookmarks: [{ type: "file", target: "~/a.md" }] })).bookmarks[0].target, "~/a.md");
+
+  eq("importing the same file again changes nothing",
+     M.mergeEntries(one, one.bookmarks).length, 4);
+  // A bookmark that reached the file by hand, or through another machine, has a
+  // different id but is still the same bookmark.
+  var handTyped = [{ id: "zzz", type: "url", label: "GitHub again", target: "https://github.com", icon: "" }];
+  eq("a duplicate is recognised by what it points at",
+     M.mergeEntries(one, handTyped).length, 4);
+  eq("a genuinely new entry is merged in",
+     M.mergeEntries(one, [{ type: "cmd", label: "New", target: "pwd", icon: "" }]).length, 5);
+  // What is already on this machine keeps its place, and what arrives goes
+  // after it: a merge that reshuffled the panel would make every bookmark move
+  // for no reason the moment someone copied a file over.
+  var merged = M.mergeEntries(one, [{ type: "cmd", label: "New", target: "pwd", icon: "" }]);
+  eq("merging keeps the saved list's order", merged.slice(0, 4).map(function (e) { return e.id; }),
+     ["a", "b", "c", "d"]);
+  eq("what arrives is appended last", merged[4].label, "New");
+  // The same target reached by a different type is a different bookmark: a URL
+  // and a command that happen to look alike are both worth having.
+  eq("a same-looking target of another type is kept",
+     M.mergeEntries(one, [{ type: "cmd", target: "https://github.com", icon: "" }]).length, 5);
+  eq("a junk incoming entry is ignored, not saved",
+     M.mergeEntries(one, [null, 5, { type: "file", target: "relative" }]).length, 4);
+  eq("merging never mutates its input", one.bookmarks.length, 4);
+
+  // A file that is not ours must never be read as an empty list, or a replace
+  // would quietly empty the panel.
+  eq("our own file is recognised", M.looksLikeOurFile(M.serialize(one)), true);
+  eq("an empty list is still our file", M.looksLikeOurFile('{"version":1,"bookmarks":[]}'), true);
+  eq("some other json is refused", M.looksLikeOurFile('{"servers":[{"host":"a"}]}'), false);
+  eq("a json array is refused", M.looksLikeOurFile('[]'), false);
+  eq("a plain number is refused", M.looksLikeOurFile("42"), false);
+  eq("text is refused", M.looksLikeOurFile("hello"), false);
+  eq("a file with one broken entry is refused",
+     M.looksLikeOurFile('{"bookmarks":[{"type":"nope","target":"x"}]}'), false);
+  // A file saved by a future version of the plugin is worth reading if the
+  // entries still make sense, so version is not what is checked.
+  eq("an unknown version is still readable",
+     M.looksLikeOurFile('{"version":99,"bookmarks":[{"type":"url","target":"https://x.com"}]}'), true);
+
+  eq("the export name is dated", M.exportName("/home/bo", "2026-09-27"), "/home/bo/omarchy-bookmarks-2026-09-27.json");
+  eq("a missing date still gives a usable name", M.exportName("/home/bo"), "/home/bo/omarchy-bookmarks-export.json");
+  eq("the export name ends in json", /\.json$/.test(M.exportName("/home/bo", "2026-09-27")), true);
 
   console.log("\n" + pass + " passed, " + fail + " failed");
   process.exit(fail ? 1 : 0);

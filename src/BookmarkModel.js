@@ -266,6 +266,50 @@ function filterEntries(state, query) {
   return out
 }
 
+// Import is a merge or a replace, decided by the caller, and both are here so
+// neither can be got wrong at the call site. Merging twice with the same file
+// must be a no-op, which is the whole reason a duplicate is recognised by what
+// the entry *is* and not only by the id it was minted with: a file that has
+// been through two machines carries ids from both, and the same bookmark typed
+// twice by hand gets a different id each time.
+function sameEntry(a, b) {
+  return a.type === b.type && a.target === b.target
+}
+
+function mergeEntries(state, incoming) {
+  var list = fromObject(state).bookmarks
+  var out = list.slice()
+  for (var i = 0; i < incoming.length; i++) {
+    var entry = normalizeEntry(incoming[i])
+    if (!entry) continue
+    var known = false
+    for (var j = 0; j < out.length; j++) {
+      if (out[j].id === entry.id || sameEntry(out[j], entry)) { known = true; break }
+    }
+    if (!known) out.push(entry)
+  }
+  return out
+}
+
+// True when the text is this plugin's own data file and not something else that
+// happens to be JSON. Without this a stray bookmarks.json from another tool, or
+// a settings export, would be read as "zero bookmarks" and a replace would
+// quietly empty the list.
+function looksLikeOurFile(rawText) {
+  var parsed
+  try {
+    parsed = JSON.parse(String(rawText === undefined || rawText === null ? "" : rawText))
+  } catch (e) {
+    return false
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false
+  if (!Array.isArray(parsed.bookmarks)) return false
+  for (var i = 0; i < parsed.bookmarks.length; i++) {
+    if (!normalizeEntry(parsed.bookmarks[i])) return false
+  }
+  return true
+}
+
 function moveBy(state, from, delta) {
   var list = fromObject(state).bookmarks.slice()
   var to = from + delta
@@ -308,6 +352,14 @@ function argvFor(entry, home) {
 
 // Mirrors BookmarkItem.qml's decision about which renderer the icon field
 // deserves, so a saved bookmark previews the same way here.
+// A dated filename, so a second export never silently overwrites the first one
+// and "which one is mine" is answered by the name rather than by remembering.
+function exportName(home, when) {
+  var stamp = String(when === undefined || when === null ? "" : when)
+  var day = /^\d{4}-\d{2}-\d{2}$/.test(stamp) ? stamp : "export"
+  return String(home === undefined || home === null ? "" : home) + "/omarchy-bookmarks-" + day + ".json"
+}
+
 function iconKind(entry) {
   var normalized = normalizeEntry(entry)
   if (!normalized) return "none"
