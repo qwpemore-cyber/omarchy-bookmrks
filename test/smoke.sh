@@ -450,6 +450,38 @@ grep -q '"J"' <<<"$keyIntent" && grep -q 'moveEntry' <<<"$handler" \
   && pass "J and K reorder, so moveEntry is reachable" \
   || bad "reordering is unreachable again"
 
+head_ "nothing is drawn wider than the panel"
+# The add/edit form asked for Style.space(330) inside a panel of
+# Style.space(300), so it overflowed the window and the buttons at its right
+# end were clipped. Style.space is linear in the panel's own scale, so the
+# numbers here can be compared directly against each other at any text size.
+panel="$(sed -n 's/.*implicitWidth: Style\.space(\([0-9]*\)).*/\1/p' "$REPO_DIR"/src/Sidebar.qml | head -1)"
+if [[ -z "$panel" ]]; then
+  bad "could not read the panel width"
+else
+  pass "the panel is Style.space($panel)"
+  too_wide=""
+  while read -r file line units; do
+    (( units > panel )) && too_wide="$too_wide $file:$line(Style.space($units))"
+  done < <(grep -rnE "^\s*(width|implicitWidth):\s*Style\.space\([0-9]+\)" "$REPO_DIR"/src \
+           | sed -E 's#^([^:]+):([0-9]+):.*Style\.space\(([0-9]+)\).*#\1 \2 \3#')
+  if [[ -z "$too_wide" ]]; then
+    pass "no element is wider than the panel"
+  else
+    bad "wider than the panel:$too_wide"
+  fi
+
+  # A child that sizes itself from a literal has to stay clamped to its parent;
+  # a literal alone is only safe while it happens to fit, which is the trap.
+  card="$(sed -n 's/.*width: Math\.min(Style\.space(\([0-9]*\)), parent\.width.*/\1/p' \
+         "$REPO_DIR"/src/components/AddBookmarkModal.qml | head -1)"
+  if [[ -n "$card" ]]; then
+    pass "the form is clamped to the panel it is drawn in"
+  else
+    bad "the form sets a literal width with no parent clamp"
+  fi
+fi
+
 head_ "the icon lookup cannot become a shell command"
 canary="$WORK/canary"
 # A name that would run a command if it were spliced into the script text. The

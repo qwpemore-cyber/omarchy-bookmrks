@@ -141,7 +141,13 @@ Item {
   BorderSurface {
     id: card
     anchors.centerIn: parent
-    width: Style.space(330)
+    // Never wider than the panel it is drawn inside. The panel is 300 units and
+    // this card asked for 330, so the form overflowed the window by 30 units:
+    // the card is centred, so 15 units hung off each side, and the right end
+    // of the fields and the buttons were clipped by the window edge. The
+    // clamp only ever bites on a narrow panel, since 330 fits comfortably
+    // inside the available 282.
+    width: Math.min(Style.space(330), parent.width - Style.space(16))
     // A form with four rows of content must not outgrow a short screen.
     // Clamped rather than plain Math.min: on a very short panel the
     // second term goes negative, and a negative height is not a small
