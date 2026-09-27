@@ -686,22 +686,34 @@ QML
     continue
   fi
 
-  overflow=0; clipped=0; tiny=0; unspecified=0
+  overflow=0; clipped=0; tiny=0; unspecified=0   # unspecified: kept for the static check's tally
   while IFS='|' read -r lines w cw h ch px lh label; do
     [[ -z "$label" ]] && continue
     (( cw > w + 1 )) && { overflow=$((overflow+1)); bad "at ${sheet_width}px, \"$label\" is $cw wide in $w"; }
     (( ch > h + 1 )) && { clipped=$((clipped+1)); bad "at ${sheet_width}px, \"$label\" needs $ch but has $h"; }
     (( px < 11 )) && { tiny=$((tiny+1)); bad "at ${sheet_width}px, \"$label\" is ${px}px"; }
-    # A line height of exactly 1 on a wrapping Text is the default, which is
-    # the setting that let the lines land on each other in the first place.
-    if (( lines > 1 )) && ! awk -v v="$lh" 'BEGIN{exit !(v>1)}'; then
-      unspecified=$((unspecified+1))
-      bad "at ${sheet_width}px, \"$label\" wraps to $lines lines with lineHeight $lh"
+    # Wrapped text must set lineHeight, and the resulting leading must be sane.
+    # The first half catches the default, which let lines land on each other.
+    # The second catches the subtler version of the same fault: QML multiplies
+    # lineHeight by the font's *natural* line height, so a multiplier that
+    # looks modest asks for nearly double spacing in omarchy.ttf, and the
+    # paragraph reads as though it has a blank line between every line.
+    if (( lines > 1 )); then
+      # Whether lineHeight was set at all is checked statically above, against
+      # the source: at runtime an explicit 1 and the unset default are the same
+      # number, so there is no way to tell them apart from here. What can be
+      # measured is the leading they produce, which is the thing that was
+      # actually wrong.
+      # Measured, not declared: height / lines, against the font's pixel size.
+      leading="$(awk -v h="$h" -v n="$lines" -v px="$px" 'BEGIN{printf "%.2f", (h/n)/px}')"
+      if ! awk -v v="$leading" 'BEGIN{exit !(v>=1.05 && v<=1.45)}'; then
+        bad "at ${sheet_width}px, \"$label\" has ${leading}x leading on a ${px}px font"
+      fi
     fi
   done < <(tr ';;' '\n' <<<"$rows")
 
   if (( overflow == 0 && clipped == 0 && tiny == 0 && unspecified == 0 )); then
-    pass "at ${sheet_width}px every line fits, is unclipped, and is at least 11px"
+    pass "at ${sheet_width}px every line fits, is unclipped, 11px or larger, with sane leading"
   fi
 
   # An unresolved binding is invisible to the walk above, which is why it got

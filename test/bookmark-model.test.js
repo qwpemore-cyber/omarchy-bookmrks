@@ -1,6 +1,6 @@
 const fs = require("fs");
 const src = fs.readFileSync(require("path").join(__dirname, "..", "src", "BookmarkModel.js"), "utf8");
-const M = new Function(src + "\nreturn {parse,serialize,append,updateAt,removeAt,moveBy,argvFor,iconKind,labelFor,makeId,isIconGlyph,isDesktopId,isSeparatorGlyph,labelForType,TYPE_GLYPHS,typeGlyph};")();
+const M = new Function(src + "\nreturn {parse,serialize,append,updateAt,removeAt,moveBy,argvFor,iconKind,labelFor,makeId,isIconGlyph,isDesktopId,isSeparatorGlyph,labelForType,TYPE_GLYPHS,typeGlyph,lineHeightFor};")();
 
 const GLYPH = String.fromCodePoint(0x0F488);   // Browser, from stock omarchy menu
 const APPGLYPH = String.fromCodePoint(0xF003B); // Apps
@@ -135,6 +135,25 @@ eq("positional parameter blocks substitution", fs.existsSync(canary), false);
 try { sh('n=' + JSON.stringify(evil) + '; echo "$n"', evil); } catch {}
 eq("JSON.stringify in the script text does not", fs.existsSync(canary), true);
 fs.rmSync(tmpdir, { recursive: true, force: true });
+
+// --- lineHeightFor
+// QML multiplies lineHeight by the font's natural line height, not by its
+// pixel size. omarchy.ttf's natural leading is wider than its pixel size, so
+// asking for 1.3 asked for roughly 1.75 and every wrapped paragraph grew a
+// blank line between each of its lines. The conversion is what stops that from
+// being a per-font accident.
+eq("leading equals the font's own when asked for it", M.lineHeightFor(16, 16), 1);
+eq("leading is proportional in between", M.lineHeightFor(19, 16), 19 / 16);
+eq("unmeasured font metrics fall back to 1", M.lineHeightFor(16, 0), 1);
+eq("negative font metrics fall back to 1", M.lineHeightFor(16, -3), 1);
+eq("undefined font metrics fall back to 1", M.lineHeightFor(16, undefined), 1);
+eq("null font metrics fall back to 1", M.lineHeightFor(16, null), 1);
+eq("NaN font metrics fall back to 1", M.lineHeightFor(16, NaN), 1);
+// The whole point: a 12px font carries ~16px of natural leading, so a plain
+// proportional multiplier always overshoots what the glyphs need.
+eq("a proportional multiplier would overshoot", M.lineHeightFor(Math.round(12 * 1.3), 16) < 1.3, true);
+eq("the leading asked for is the leading delivered",
+   M.lineHeightFor(Math.round(12 * 1.3), 16) * 16, Math.round(12 * 1.3));
 
 console.log("\n" + pass + " passed, " + fail + " failed");
 process.exit(fail ? 1 : 0);

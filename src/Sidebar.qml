@@ -406,7 +406,7 @@ Item {
     WlrLayershell.layer: WlrLayer.Overlay
     // Focus is dropped while the form is up: the form's own fields hold it,
     // and the window must not keep exclusive focus behind them.
-    WlrLayershell.keyboardFocus: opened && !modal.opened ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+    WlrLayershell.keyboardFocus: opened && !root.overlayOpen ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     exclusionMode: ExclusionMode.Ignore
 
     // Only the sidebar's own pixels take input; the rest of the desktop stays
@@ -466,10 +466,16 @@ Item {
         }
       }
 
+      // The list and the header. Hidden outright while a sheet is open: a
+      // scrim alone is not enough, because even a nearly opaque backdrop
+      // shows the header's icons and the current row as faint marks inside
+      // the sheet, and those read as corrupted glyphs rather than as a
+      // backdrop. Hiding is also cheaper than repainting the list every frame.
       ColumnLayout {
         anchors.fill: parent
         anchors.margins: Style.space(9)
         spacing: Style.space(6)
+          visible: !root.overlayOpen
 
         RowLayout {
           Layout.fillWidth: true

@@ -29,6 +29,18 @@ var TYPE_GLYPHS = {
   separator: "."
 }
 
+// QML's `lineHeight` multiplies the font's own line height, not its pixel
+// size, so a multiplier that reads correctly in one font is double spacing in
+// another. With omarchy.ttf a 12px font has a ~16px natural line height, so
+// lineHeight 1.3 produced 21px lines and the paragraph looked like it had a
+// blank line between every line. This turns a wanted leading, in pixels, into
+// the multiplier Qt actually multiplies by, so the leading is what it says
+// whatever font is in use.
+function lineHeightFor(leadingPx, naturalPx) {
+  if (!(naturalPx > 0)) return 1
+  return leadingPx / naturalPx
+}
+
 function isSupportedType(type) {
   return TYPES.indexOf(String(type)) !== -1
 }

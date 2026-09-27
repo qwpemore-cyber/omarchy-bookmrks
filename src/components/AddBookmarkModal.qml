@@ -133,7 +133,8 @@ Item {
 
   Rectangle {
     anchors.fill: parent
-    color: Util.alpha(Color.background, 0.72)
+    // Matches the settings sheet: see the note there about stray marks.
+    color: Util.alpha(Color.background, 0.97)
   }
 
   MouseArea {

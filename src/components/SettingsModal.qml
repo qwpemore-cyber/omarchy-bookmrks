@@ -10,6 +10,7 @@ import QtQuick.Layouts
 import Quickshell
 import qs.Commons
 import qs.Ui
+import "../BookmarkModel.js" as Model
 
 // Settings sheet. A shell of its own so the header's gear button has
 // something real to open, and so a setting has a place to go that is not the
@@ -49,9 +50,12 @@ Item {
   // A settings sheet is a read-mostly surface: there is no text field to type
   // into, so the catcher's own Escape is what closes it and nothing has to be
   // forwarded from a field the way the bookmark form has to.
+  // Opaque enough to actually hide what is behind it. At 0.72 the panel's own
+  // header and rows showed through as faint stray marks inside the sheet,
+  // which read as broken glyphs rather than as a dimmed backdrop.
   Rectangle {
     anchors.fill: parent
-    color: Util.alpha(Color.background, 0.72)
+    color: Util.alpha(Color.background, 0.97)
   }
 
   MouseArea {
@@ -110,7 +114,7 @@ Item {
           // worse than a heading on two lines, and at 200px wide this one needs
           // 173px of the 156px available.
           wrapMode: Text.WordWrap
-          lineHeight: 1.25
+          lineHeight: Model.lineHeightFor(Math.round(Style.font.body * 1.25), fontMetrics.height)
           horizontalAlignment: Text.AlignHCenter
         }
 
@@ -136,7 +140,7 @@ Item {
           font.pixelSize: Style.font.body
           color: Util.alpha(Color.popups.text, 0.7)
           wrapMode: Text.WordWrap
-          lineHeight: 1.3
+          lineHeight: Model.lineHeightFor(Math.round(Style.font.body * 1.3), fontMetrics.height)
           horizontalAlignment: Text.AlignHCenter
         }
       }
