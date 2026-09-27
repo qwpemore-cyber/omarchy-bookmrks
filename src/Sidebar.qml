@@ -283,7 +283,7 @@ Item {
 
     // Pinned to the left edge, full height, and never reserving layout space.
     anchors { left: true; top: true; bottom: true }
-    width: Style.space(300)
+    implicitWidth: Style.space(300)
     color: "transparent"
     WlrLayershell.namespace: "omarchy-bookmarks-bar"
     WlrLayershell.layer: WlrLayer.Overlay
