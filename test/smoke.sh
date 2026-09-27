@@ -968,6 +968,21 @@ else
   bad "the control case did not execute, so the test proves nothing"
 fi
 
+head_ "the panel leaves the desktop alone"
+# A panel that is merely open must not hold the keyboard. The reason it is
+# pinned to the edge is being usable beside the desktop, and Exclusive focus
+# while merely open made every keystroke go to the sidebar the moment it
+# appeared. Exclusive is still correct while a form is up, because a text field
+# receives nothing without it.
+if grep -q 'keyboardFocus: opened && !root.overlayOpen' "$REPO_DIR/src/Sidebar.qml"; then
+  bad "the panel steals the keyboard just by being open"
+elif grep -q 'WlrKeyboardFocus.OnDemand' "$REPO_DIR/src/Sidebar.qml" \
+     && grep -q 'WlrKeyboardFocus.Exclusive' "$REPO_DIR/src/Sidebar.qml"; then
+  pass "the panel asks for focus instead of taking it (OnDemand, Exclusive only for forms)"
+else
+  bad "the panel's keyboard focus mode is not the expected one"
+fi
+
 head_ "the data model"
 if (cd "$REPO_DIR" && node test/bookmark-model.test.js >"$WORK/model.log" 2>&1); then
   pass "$(tail -1 "$WORK/model.log")"

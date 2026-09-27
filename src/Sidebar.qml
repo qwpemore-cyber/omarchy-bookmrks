@@ -404,9 +404,18 @@ Item {
     color: "transparent"
     WlrLayershell.namespace: "omarchy-bookmarks-bar"
     WlrLayershell.layer: WlrLayer.Overlay
-    // Focus is dropped while the form is up: the form's own fields hold it,
-    // and the window must not keep exclusive focus behind them.
-    WlrLayershell.keyboardFocus: opened && !root.overlayOpen ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+    // The panel must never hold the keyboard hostage. Exclusive focus was
+    // taken whenever the panel was merely open, which meant the instant the
+    // panel appeared every keystroke on the desktop went to the sidebar: the
+    // rest of the session was unusable while it sat there. OnDemand lets the
+    // compositor hand over the keyboard when the panel is actually clicked and
+    // take it straight back when focus moves away, so browsing the list and
+    // working on the desktop are possible at the same time. Only the forms
+    // need Exclusive, because a text field cannot receive anything at all
+    // without it.
+    WlrLayershell.keyboardFocus: root.overlayOpen
+      ? WlrKeyboardFocus.Exclusive
+      : (opened ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None)
     exclusionMode: ExclusionMode.Ignore
 
     // Only the sidebar's own pixels take input; the rest of the desktop stays
@@ -414,6 +423,10 @@ Item {
     mask: Region { item: card }
 
     onOpenedChanged: {
+      // This pre-selects the first row so the list is already driven once the
+      // keyboard arrives. It does not take the keyboard: with OnDemand focus
+      // the compositor decides that, and until it does the panel is a
+      // read-only overlay that the desktop is free to use.
       if (opened) keys.forceActiveFocus()
       else modal.close()
     }

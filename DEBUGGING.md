@@ -73,3 +73,4 @@ comes back:
   nothing.
 - **A documented verb is a verb that exists.** The README is compared against
   the source, in both directions.
+| the desktop is unusable while the panel is open | `WlrLayershell.keyboardFocus` in `Sidebar.qml` | `keyboardFocus: opened && !root.overlayOpen` |
