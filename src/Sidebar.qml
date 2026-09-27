@@ -373,6 +373,7 @@ Item {
     if (t === "a" || t === "A") return "add"
     if (t === "J") return "moveUp"
     if (t === "K") return "moveDown"
+    if (t === "/") return "search"
     return ""
   }
 
@@ -575,6 +576,10 @@ Item {
           // Reordering had a model, a panel function and no way to reach it.
           else if (root.keyIntent(t) === "moveUp") root.moveEntry(root.selectedIndex, -1)
           else if (root.keyIntent(t) === "moveDown") root.moveEntry(root.selectedIndex, 1)
+          // "/" is where a keyboard user expects to find search, and a search
+          // box that can only be reached with the pointer is not keyboard
+          // reachable. Return never makes it to here: it is the launch key.
+          else if (root.keyIntent(t) === "search") filterField.forceActiveFocus()
         }
         onTabRequested: function(direction) {
           // Tab edits the current row, Shift+Tab removes it, so the mouse-only

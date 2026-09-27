@@ -611,6 +611,33 @@ done < <(find "$REPO_DIR/src" -name '*.qml') > "$WORK/unlined.txt"
 # Every property the panel hands the sheet has to exist on the panel. A string
 # property assigned undefined is a runtime warning that no linter reports and
 # that only shows up in the shell's log, so it is checked here instead.
+# A key in the README that no longer works should fail the test rather than
+# surprise a user, and the search key is the newest one.
+head_ "the keys the README promises are the keys the panel answers to"
+panel="$REPO_DIR/src/Sidebar.qml"
+# "a" also accepts an upper-case A, so its line reads differently from the
+# others. Both forms are the same rule: the key and what it does are on one
+# line together, which is what awk is asked for here rather than a pattern
+# clever enough to need escaping.
+while IFS=: read -r key intent; do
+  if awk -v k="t === \"$key\"" -v i="return \"$intent\"" \
+       'index($0, k) && index($0, i) { found = 1 } END { exit !found }' "$panel"; then
+    pass "the panel answers to $key"
+  else
+    bad "the README promises $key but the panel has no $intent intent for it"
+  fi
+done <<'KEYS'
+a:add
+J:moveUp
+K:moveDown
+/:search
+KEYS
+
+grep -q 'root.keyIntent(t) === "search"' "$panel" \
+  && grep -q "search.*forceActiveFocus" "$panel" \
+  && pass "/ actually puts the cursor in the filter" \
+  || bad "/ is documented but does not open the filter"
+
 head_ "the panel does not hand the sheet a property it does not have"
 panel_declared="$(grep -oE '^([[:space:]]*)(readonly )?property [A-Za-z<>]+ ([a-zA-Z_][A-Za-z0-9_]*)' \
                    "$REPO_DIR"/src/Sidebar.qml | awk '{print $NF}' | sort -u)"

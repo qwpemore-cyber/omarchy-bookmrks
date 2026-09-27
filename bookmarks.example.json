@@ -1,26 +1,9 @@
 {
   "version": 1,
   "bookmarks": [
-    {
-      "id": "b-example-url",
-      "type": "url",
-      "label": "GitHub",
-      "target": "https://github.com",
-      "icon": ""
-    },
-    {
-      "id": "b-example-app",
-      "type": "app",
-      "label": "Files",
-      "target": "org.gnome.Nautilus",
-      "icon": "org.gnome.Nautilus"
-    },
-    {
-      "id": "b-example-cmd",
-      "type": "cmd",
-      "label": "Screenshot",
-      "target": "omarchy-capture-screenshot",
-      "icon": ""
-    }
+    { "id": "a1b2c3d4", "type": "url",  "label": "GitHub",     "target": "https://github.com",              "icon": "" },
+    { "id": "e5f6g7h8", "type": "app",  "label": "Files",      "target": "org.gnome.Nautilus",             "icon": "org.gnome.Nautilus" },
+    { "id": "i9j0k1l2", "type": "cmd",  "label": "Screenshot", "target": "omarchy-capture-screenshot",      "icon": "" },
+    { "id": "m3n4o5p6", "type": "file", "label": "Notes",      "target": "~/Documents/notes.md",            "icon": "" }
   ]
 }

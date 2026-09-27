@@ -16,6 +16,8 @@ links, apps, and commands — one `SUPER + B` away.
   | `cmd` | any command | `omarchy-capture-screenshot` |
   | `file` | a file or folder | `~/notes.md`, `/etc/hosts` |
 - Add, edit, reorder, and delete entries from the sidebar.
+- A filter box that searches names and targets as you type.
+- Export and import, so the list can be moved to another machine.
 - Icons resolved from your installed `.desktop` files, falling back to a glyph
   per type.
 - Follows your theme and font size, and respects reduced motion.
@@ -62,6 +64,42 @@ one, otherwise a glyph for the type.
 `cmd` is the only type that goes through a shell, which is the point of it. A
 `url` or `app` target is passed as an argument and can never become a command
 line, so a target containing spaces or quotes still does what it says.
+
+### Searching
+
+The box above the list filters as you type, on both the label and the target —
+the name somebody gave a bookmark and the thing it points at are rarely the same
+word, and the target is usually what they remember. The header counts what is
+shown out of what exists (`2 of 14`), so a filter that hid something cannot
+quietly look like a list that never had it.
+
+A search never changes what is saved. Filtering hides rows; it does not delete
+them, and edit, delete and reorder still act on the entry you clicked, not on
+whatever slid into its place. `Escape` clears the query before it closes
+anything, and the box starts empty every time the panel opens.
+
+### Moving to another machine
+
+The gear button opens the settings sheet, which has three things in it:
+
+- **Export…** writes your list to a JSON file, named
+  `omarchy-bookmarks-YYYY-MM-DD.json` so a second export lands beside the first
+  one instead of overwriting it. Copy that file to the other machine however you
+  like — a USB stick, `scp`, a synced folder.
+- **Import…** reads one back. When the file is read, two buttons appear: **Merge**
+  adds anything you do not already have and leaves the rest alone, and **Replace**
+  makes the file the whole list. **Merge** is the one that cannot lose anything.
+- **Reveal bookmarks.json** opens the live file in your editor.
+
+Importing the same file twice adds nothing the second time. An entry is
+recognised by its `id` and also by what it points at, so a bookmark that reached
+the file by hand, or through another machine, is not duplicated. A file that is
+not this panel's own — some other tool's JSON, a half-written file — is refused
+and nothing is changed, so a stray file can never be read as "zero bookmarks" and
+silently empty the list.
+
+`file` targets keep their `~`, so a list exported from one account and imported
+on another still points at the right home directory.
 
 ### Where your entries live
 
@@ -208,7 +246,12 @@ The panel is built for the keyboard, so nothing needs the mouse:
 | `Shift`+`Tab` | remove the selected bookmark |
 | `x` | remove the selected bookmark |
 | `J` / `K` | move the selected bookmark up / down |
-| `Escape` | close the panel |
+| `/` | search, putting the cursor in the filter box |
+| `Escape` | clear the search, or close the panel if there is none |
+
+While the filter box has the cursor, `j` and `k` are letters and go into the
+box, not up and down the list; `Return` still launches the highlighted bookmark
+and `Escape` clears the box.
 
 The same letters work in the add/edit form: `j`/`k` and `h`/`l` pick the type,
 and `Return` saves while `Escape` cancels. `h` and `l` do nothing in the list
