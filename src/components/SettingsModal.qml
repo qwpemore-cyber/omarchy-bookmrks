@@ -24,6 +24,11 @@ Item {
 
   readonly property bool opened: modalOpen
   property bool modalOpen: false
+  // Without this the sheet is painted forever. `opened` is only a flag; nothing
+  // hides the item, so closing it changes a boolean and leaves a full-panel
+  // scrim and card sitting on top of the bookmark list. AddBookmarkModal has
+  // this line; this one was written without it, and the panel came up blank.
+  visible: modalOpen
 
   signal closed()
 

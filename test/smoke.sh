@@ -747,6 +747,89 @@ QML
   fi
 done
 
+head_ "a closed sheet paints nothing"
+# The settings sheet shipped with no `visible` binding, so closing it changed a
+# boolean and left a full-panel scrim and card drawn over the bookmark list.
+# The panel came up blank and every test passed, because every test read the
+# `opened` property — which was correctly false — and none of them asked
+# whether a single pixel was painted. A flag is not a rendering.
+#
+# So this asks the rendering. Both sheets, closed and open, in one harness.
+
+cat > "$WORK/shell.qml" <<'QML'
+import QtQuick
+import "components" as C
+
+Item {
+  id: root
+  width: 300
+  height: 500
+
+  C.AddBookmarkModal { id: form; anchors.fill: parent }
+  C.SettingsModal { id: sheet; anchors.fill: parent }
+
+  // Counts what would actually be drawn: a Text only counts if it and every
+  // ancestor up to here is visible. That is the same question the compositor
+  // asks, which is why a wrong answer here is a wrong screen.
+  function painted(it) {
+    var kids = it.children, n = 0
+    for (var i = 0; i < kids.length; i++) {
+      var k = kids[i]
+      if (!k.visible) continue
+      if (k.toString().indexOf("QQuickText") >= 0 && (k.text || "") !== "") n++
+      n += painted(k)
+    }
+    return n
+  }
+
+  Component.onCompleted: Qt.callLater(function() {
+    var out = []
+    out.push("sheetInvisibleWhenClosed=" + (sheet.visible === false))
+    out.push("formInvisibleWhenClosed=" + (form.visible === false))
+    out.push("nothingPaintedWhenClosed=" + (painted(root) === 0))
+    sheet.open()
+    out.push("sheetVisibleWhenOpen=" + (sheet.visible === true))
+    out.push("sheetPaintsWhenOpen=" + (painted(sheet) > 0))
+    sheet.close()
+    out.push("nothingPaintedAfterClose=" + (painted(root) === 0))
+    form.openFor(-1, { type: "url", label: "x", target: "https://x.example", icon: "" })
+    out.push("formVisibleWhenOpen=" + (form.visible === true))
+    out.push("formPaintsWhenOpen=" + (painted(form) > 0))
+    form.close()
+    out.push("nothingPaintedAfterFormClose=" + (painted(root) === 0))
+    console.log("PAINT " + out.join(" "))
+    Qt.callLater(Qt.quit)
+  })
+}
+QML
+
+res="$(run_scene | sed -n 's/.*PAINT //p')"
+if [[ -z "$res" ]]; then
+  bad "the paint harness reported nothing"
+  run_scene | grep -vE "$noise" | tail -6
+else
+  for pair in $res; do
+    case "$pair" in
+      *=true)  pass "${pair%%=*}" ;;
+      *=false) bad "${pair%%=*}" ;;
+      *)       bad "unreadable result: $pair" ;;
+    esac
+  done
+fi
+
+# And the rule itself, so a third sheet cannot be written without it. Reading
+# the source is the only way to catch a sheet that is never opened at all, which
+# is exactly the case that shipped: nothing in the harness would have called
+# open() on it, so only the declaration gives it away.
+for sheet in AddBookmarkModal SettingsModal; do
+  if sed -n '/^Item {/,/^  }$/p' "$REPO_DIR"/src/components/$sheet.qml \
+       | grep -q "visible: modalOpen"; then
+    pass "$sheet is hidden when it is closed"
+  else
+    bad "$sheet has no visible binding and would be painted forever"
+  fi
+done
+
 head_ "the settings sheet behaves"
 # The settings sheet is a second surface over the same list, so the mistakes
 # available here are: a card wider than the panel, and a keystroke reaching

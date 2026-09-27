@@ -64,6 +64,10 @@ comes back:
   never a literal width.
 - **Wrapped text sets `lineHeight`.** The default comes from font metrics and
   let two lines land on top of each other.
+- **A flag is not a rendering.** `opened: false` proves nothing; only
+  `visible` hides anything. Every sheet gates its own visibility, and
+  `test/smoke.sh` counts the Text items that would actually be drawn, because
+  the property was correctly false while the pixels were still on screen.
 - **Text is measured, not eyeballed.** `test/smoke.sh` walks the rendered
   geometry and fails on overflow, clipping, or a binding that resolved to
   nothing.
