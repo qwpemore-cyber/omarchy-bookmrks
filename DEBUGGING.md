@@ -73,6 +73,20 @@ comes back:
   nothing.
 - **A documented verb is a verb that exists.** The README is compared against
   the source, in both directions.
+- **A filter changes the view, never the data.** Hiding rows renumbers the ones
+  that are left, so every action aimed at a visible row is translated through
+  `fullRowFor()` into the full list first. See `Model.filterIndexes`.
+- **A save is asynchronous.** `FileView.setText()` returns before the bytes
+  land, so anything that reads a file straight after writing it sees a file
+  that exists and is empty. Wait on `onFileChanged`, which is what the panel's
+  own data file does.
+- **A property handed to another object is declared.** A `QString` assigned
+  `undefined` is a warning in the shell's log and nothing at all to
+  `qmllint`; `test/smoke.sh` checks the panel's handover both ways.
+- **An unreadable file is not an empty one.** Import refuses anything that is
+  not this plugin's format, and "nothing picked" (`null`) is a different answer
+  from "a file with no bookmarks" (`[]`), because only one of those followed by
+  a replace loses work.
 | an export produced an empty or missing file | `setText` right after setting `path`; the write is async and has to be waited on with `onFileChanged` |
 | importing wiped the list | a file that failed the `looksLikeOurFile()` check was read as zero bookmarks, then replaced |
 | the filter deletes the wrong bookmark | an action addressed the view row instead of `fullRowFor(viewRow)` |
