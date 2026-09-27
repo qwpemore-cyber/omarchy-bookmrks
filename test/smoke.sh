@@ -608,6 +608,26 @@ while read -r f; do
             } }
   ' "$f"
 done < <(find "$REPO_DIR/src" -name '*.qml') > "$WORK/unlined.txt"
+# Every property the panel hands the sheet has to exist on the panel. A string
+# property assigned undefined is a runtime warning that no linter reports and
+# that only shows up in the shell's log, so it is checked here instead.
+head_ "the panel does not hand the sheet a property it does not have"
+panel_declared="$(grep -oE '^([[:space:]]*)(readonly )?property [A-Za-z<>]+ ([a-zA-Z_][A-Za-z0-9_]*)' \
+                   "$REPO_DIR"/src/Sidebar.qml | awk '{print $NF}' | sort -u)"
+handed="$(sed -n '/Components.SettingsModal {/,/^    }$/p' "$REPO_DIR"/src/Sidebar.qml \
+          | grep -oE '^[[:space:]]+[a-zA-Z_][A-Za-z0-9_]*: root\.[a-zA-Z_][A-Za-z0-9_]*' \
+          | sed -E 's/.*root\.//' | sort -u)"
+missing=""
+while read -r name; do
+  [[ -z "$name" ]] && continue
+  grep -qx "$name" <<<"$panel_declared" || missing="$missing $name"
+done <<<"$handed"
+if [[ -z "$missing" ]]; then
+  pass "every property the panel hands over is declared on the panel"
+else
+  bad "the panel hands the sheet properties it does not declare:$missing"
+fi
+
 if [[ -s "$WORK/unlined.txt" ]]; then
   bad "wrapped text with no lineHeight:"
   sed 's/^/    /' "$WORK/unlined.txt"

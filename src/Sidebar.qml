@@ -104,6 +104,15 @@ Item {
   // the view is currently showing.
   property var allEntries: []
   property string filterQuery: ""
+  // Today, as a date the export filename can use. It lives here because the
+  // panel is the one place that knows what time it is, and a sheet handed
+  // "undefined" for its date would name every export the same thing.
+  readonly property string today: {
+    var d = new Date()
+    var m = d.getMonth() + 1
+    var day = d.getDate()
+    return d.getFullYear() + "-" + (m < 10 ? "0" + m : m) + "-" + (day < 10 ? "0" + day : day)
+  }
 
   function entryAt(row) {
     if (row < 0 || row >= listModel.count) return null
