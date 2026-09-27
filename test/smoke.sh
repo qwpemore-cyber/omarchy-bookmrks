@@ -721,8 +721,26 @@ QML
   # its default empty string, so there is no wide, no text and nothing to
   # measure. The engine does complain, so the complaint is the check. Reading
   # the walk for "undefined" would only ever find the cases that are loud.
-  if run_scene | grep -q "Unable to assign"; then
-    bad "at ${sheet_width}px a binding resolved to undefined:"
+  # A wrong measurement and no measurement look identical from the outside:
+  # lineHeightFor(16, undefined) is 1, and against this font's natural leading
+  # that reproduces the leading that was requested. So the helper has to be
+  # handed a real number, which is checked here rather than inferred from the
+  # rendered result.
+  measured="$(sed -n 's/.*lineHeight: Model\.lineHeightFor([^,]*, *\([a-zA-Z]*\)\.height).*/\1/p' \
+             "$REPO_DIR"/src/components/SettingsModal.qml | sort -u | tr '\n' ' ')"
+  if [[ "$measured" == "bodyMetrics " ]]; then
+    pass "the leading is computed from a measured font, not a fallback"
+  else
+    bad "the sheet computes its leading from [$measured] rather than a TextMetrics measurement"
+  fi
+
+  # Every class of engine complaint, not just the one that happened first.
+  # A ReferenceError in a binding falls back to a default that can be exactly
+  # right by coincidence — lineHeightFor(x, undefined) is 1, and 1 against
+  # this font's natural leading gives the leading that was asked for — so a
+  # numeric check downstream cannot see it and the complaint is all there is.
+  if run_scene | grep -qE "Unable to assign|ReferenceError|TypeError|is not a (function|type)|Cannot read"; then
+    bad "at ${sheet_width}px the engine reported a broken binding:"
     run_scene | sed -n 's/.*WARN scene: \(@[^ ]*\).*/    \1/p' | sort -u
   else
     pass "at ${sheet_width}px no binding resolved to undefined"

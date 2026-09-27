@@ -82,6 +82,17 @@ Item {
       onCloseRequested: root.cancel()
     }
 
+    // How tall one line of body text actually is in the font in use. Measured
+    // with TextMetrics because there is no `fontMetrics` attached property on
+    // this item type here — binding to it threw a ReferenceError, and the
+    // fallback happened to give the right answer, so it looked correct while
+    // logging an error twice a second.
+    TextMetrics {
+      id: bodyMetrics
+      font.family: Style.font.family
+      font.pixelSize: Style.font.body
+    }
+
     ColumnLayout {
       id: form
       anchors.fill: parent
@@ -114,7 +125,7 @@ Item {
           // worse than a heading on two lines, and at 200px wide this one needs
           // 173px of the 156px available.
           wrapMode: Text.WordWrap
-          lineHeight: Model.lineHeightFor(Math.round(Style.font.body * 1.25), fontMetrics.height)
+          lineHeight: Model.lineHeightFor(Math.round(Style.font.body * 1.25), bodyMetrics.height)
           horizontalAlignment: Text.AlignHCenter
         }
 
@@ -140,7 +151,7 @@ Item {
           font.pixelSize: Style.font.body
           color: Util.alpha(Color.popups.text, 0.7)
           wrapMode: Text.WordWrap
-          lineHeight: Model.lineHeightFor(Math.round(Style.font.body * 1.3), fontMetrics.height)
+          lineHeight: Model.lineHeightFor(Math.round(Style.font.body * 1.3), bodyMetrics.height)
           horizontalAlignment: Text.AlignHCenter
         }
       }
