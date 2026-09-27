@@ -5,6 +5,7 @@
 
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Dialogs
 import Quickshell
 import qs.Commons
 import qs.Ui
@@ -83,8 +84,18 @@ Item {
     cancelled()
   }
 
-    // Validate through the model rather than duplicating its rules here, so a
-    // target the model would reject never reaches the saved file.
+  // The message follows the reason. "A target is required" next to a full
+  // relative path would send the user looking for the wrong problem, so a
+  // rejected-but-present target says what a path has to look like instead.
+  function targetProblem() {
+    if (String(targetField.text).trim() === "") return "A target is required."
+    if (root.type === "file" && !Model.isFileTarget(String(targetField.text).trim()))
+      return "Use a full path, or start it with ~."
+    return "That target is not valid."
+  }
+
+  // Validate through the model rather than duplicating its rules here, so a
+  // target the model would reject never reaches the saved file.
   function submit() {
     var normalized = Model.normalizeEntry({
       id: root.entryId,
@@ -94,6 +105,7 @@ Item {
       icon: iconField.text
     })
     if (!normalized) {
+      targetError.text = root.targetProblem()
       targetError.visible = true
       targetField.forceActiveFocus()
       focusField = 1
@@ -270,8 +282,34 @@ Item {
           Layout.fillWidth: true
           placeholderText: root.type === "url" ? "https://example.com"
             : root.type === "app" ? "firefox or org.gnome.Nautilus"
+            : root.type === "file" ? "~/notes.md or /etc/hosts"
             : "any shell command"
           onActiveFocusChanged: root.focusField = activeFocus ? 1 : -1
+        }
+
+        // Typing a path by hand is how a bookmark works forever, so the field
+        // above is never replaced or made read-only by this. The two pickers
+        // are a shortcut for the first time and for paths you have forgotten;
+        // both fill the same field, and either is optional.
+        RowLayout {
+          Layout.fillWidth: true
+          Layout.topMargin: Style.space(2)
+          spacing: Style.space(6)
+          visible: root.type === "file"
+
+          Button {
+            id: browseFileButton
+            text: "File…"
+            onClicked: filePicker.open()
+          }
+
+          Button {
+            id: browseFolderButton
+            text: "Folder…"
+            onClicked: folderPicker.open()
+          }
+
+          Item { Layout.fillWidth: true }
         }
 
         Text {
@@ -331,6 +369,39 @@ Item {
           onClicked: root.submit()
         }
       }
+    }
+
+    // ---- pickers
+    // The form is a child of a PanelWindow, and a dialog opened from one has to
+    // be a child of the form rather than of the window: that is what gives it a
+    // real parent to sit against. `open()` is a method call here, not an
+    // assignment — `open` is a read-only property, and setting it does nothing
+    // but log a TypeError.
+
+    function acceptPath(chosen) {
+      var text = String(chosen === undefined || chosen === null ? "" : chosen).trim()
+      if (text === "") return
+      targetField.text = text
+      targetError.visible = false
+      targetField.forceActiveFocus()
+      focusField = 1
+    }
+
+    FileDialog {
+      id: filePicker
+      title: "Choose a file"
+      fileMode: FileDialog.OpenFile
+      onAccepted: root.acceptPath(selectedFile)
+    }
+
+    FolderDialog {
+      id: folderPicker
+      title: "Choose a folder"
+      // A folder picker answers with a directory URL. Stripping the scheme
+      // rather than storing the URL keeps the target in the one form the model
+      // accepts and the one xdg-open is given at launch, so "file:///home/bo"
+      // can never reach the file rule and be silently dropped on save.
+      onAccepted: root.acceptPath(String(selectedFolder).replace(/^file:\/\//, ""))
     }
   }
 }
