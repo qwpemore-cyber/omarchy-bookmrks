@@ -156,6 +156,39 @@ Item {
     onClicked: function(mouse) { mouse.accepted = true }
   }
 
+  // ---- pickers
+  // The form is a child of a PanelWindow, and a dialog opened from one has to
+  // be a child of the form rather than of the window: that is what gives it a
+  // real parent to sit against. `open()` is a method call here, not an
+  // assignment — `open` is a read-only property, and setting it does nothing
+  // but log a TypeError.
+
+  function acceptPath(chosen) {
+    var text = String(chosen === undefined || chosen === null ? "" : chosen).trim()
+    if (text === "") return
+    targetField.text = text
+    targetError.visible = false
+    targetField.forceActiveFocus()
+    focusField = 1
+  }
+
+  FileDialog {
+    id: filePicker
+    title: "Choose a file"
+    fileMode: FileDialog.OpenFile
+    onAccepted: root.acceptPath(selectedFile)
+  }
+
+  FolderDialog {
+    id: folderPicker
+    title: "Choose a folder"
+    // A folder picker answers with a directory URL. Stripping the scheme
+    // rather than storing the URL keeps the target in the one form the model
+    // accepts and the one xdg-open is given at launch, so "file:///home/bo"
+    // can never reach the file rule and be silently dropped on save.
+    onAccepted: root.acceptPath(String(selectedFolder).replace(/^file:\/\//, ""))
+  }
+
   BorderSurface {
     id: card
     anchors.centerIn: parent
@@ -371,37 +404,6 @@ Item {
       }
     }
 
-    // ---- pickers
-    // The form is a child of a PanelWindow, and a dialog opened from one has to
-    // be a child of the form rather than of the window: that is what gives it a
-    // real parent to sit against. `open()` is a method call here, not an
-    // assignment — `open` is a read-only property, and setting it does nothing
-    // but log a TypeError.
 
-    function acceptPath(chosen) {
-      var text = String(chosen === undefined || chosen === null ? "" : chosen).trim()
-      if (text === "") return
-      targetField.text = text
-      targetError.visible = false
-      targetField.forceActiveFocus()
-      focusField = 1
-    }
-
-    FileDialog {
-      id: filePicker
-      title: "Choose a file"
-      fileMode: FileDialog.OpenFile
-      onAccepted: root.acceptPath(selectedFile)
-    }
-
-    FolderDialog {
-      id: folderPicker
-      title: "Choose a folder"
-      // A folder picker answers with a directory URL. Stripping the scheme
-      // rather than storing the URL keeps the target in the one form the model
-      // accepts and the one xdg-open is given at launch, so "file:///home/bo"
-      // can never reach the file rule and be silently dropped on save.
-      onAccepted: root.acceptPath(String(selectedFolder).replace(/^file:\/\//, ""))
-    }
   }
 }

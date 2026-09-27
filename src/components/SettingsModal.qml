@@ -37,7 +37,11 @@ Item {
   // with root.dataPath so there is one authority, not two that can drift.
   // This used to be Quickshell.dataPath, which is ~/.local/share — a
   // different directory, so the sheet pointed at a file that does not exist.
-  property string dataPath: Quickshell.env("HOME") + "/.config/omarchy/bookmarks.json"
+  // Spelled the same way the panel spells it, so the two cannot drift: the
+  // sheet is useful on its own and the panel still overwrites this with its own
+  // path, and one authority ends up being one expression rather than a habit.
+  readonly property string homeDir: Quickshell.env("HOME")
+  property string dataPath: homeDir + "/.config/omarchy/bookmarks.json"
 
   function open() {
     modalOpen = true

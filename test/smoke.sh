@@ -903,6 +903,119 @@ else
   done
 fi
 
+# A picked path and a typed one are the same field, and the pickers must not
+# appear for types that have nothing to pick.
+#
+# The form's own fields are unreachable from out here — a QML `id` is not a
+# property, so form.targetField does not exist. Everything is therefore driven
+# the way the harness above drives it: seed through openFor(), act through the
+# root's own functions, and read the answer off the submitted signal. The picker
+# buttons are the one thing that must be found by walking, because `text` is a
+# real property and their visibility is the thing under test.
+cat > "$WORK/shell.qml" <<'QML'
+import QtQuick
+import "components" as C
+
+Item {
+  id: harness
+  width: 340
+  height: 600
+
+  property int submittedCount: 0
+  property string lastPayload: ""
+  property bool lastCancelled: false
+
+  function byText(want) {
+    var found = null
+    function walk(item) {
+      if (item.text === want) found = item
+      for (var i = 0; i < item.children.length; i++) walk(item.children[i])
+    }
+    walk(m)
+    return found
+  }
+
+  C.AddBookmarkModal {
+    id: m
+    anchors.fill: parent
+    onSubmitted: function(index, payloadJson) {
+      harness.submittedCount++
+      harness.lastPayload = payloadJson
+    }
+    onCancelled: harness.lastCancelled = true
+  }
+
+  // A submitted payload, or "" when the form refused to submit.
+  function save(entry) {
+    harness.submittedCount = 0
+    m.openFor(-1, entry)
+    m.submit()
+    return harness.submittedCount === 1 ? JSON.parse(harness.lastPayload) : null
+  }
+
+  Component.onCompleted: {
+    var out = []
+    var file = { type: "file", label: "", icon: "" }
+
+    var fileBtn = byText("File\u2026")
+    var folderBtn = byText("Folder\u2026")
+    out.push("pickersExist=" + (fileBtn !== null && folderBtn !== null))
+
+    m.openFor(-1, { type: "file", label: "", target: "", icon: "" })
+    out.push("browsersShowForFile=" + (fileBtn.visible && folderBtn.visible))
+
+    m.openFor(-1, { type: "url", label: "", target: "", icon: "" })
+    out.push("browsersHideForUrl=" + (!fileBtn.visible && !folderBtn.visible))
+
+    m.openFor(-1, { type: "cmd", label: "", target: "", icon: "" })
+    out.push("browsersHideForCmd=" + (!fileBtn.visible && !folderBtn.visible))
+
+    // What a picker does: hand a path to the form, which then owns it. The
+    // field stays editable, so the saved value is the path, not a reference to
+    // whatever the dialog last had open.
+    m.openFor(-1, { type: "file", label: "", target: "", icon: "" })
+    m.acceptPath("/tmp/My Notes/a.md")
+    out.push("pickedPathAccepted=" + (save({ type: "file", target: "/tmp/My Notes/a.md" }) !== null))
+
+    // A path with a space in it is the whole reason this type exists, and the
+    // label is the basename rather than the word before the space.
+    var picked = save({ type: "file", target: "/tmp/My Notes/quarterly report.md" })
+    out.push("pathWithSpacesSaved=" + (picked !== null && picked.target === "/tmp/My Notes/quarterly report.md"))
+    out.push("labelIsBasename=" + (picked !== null && picked.label === "quarterly report.md"))
+
+    // A directory is the same call and the same kind of bookmark.
+    out.push("directorySaved=" + (save({ type: "file", target: "/home/bo/code" }) !== null))
+    out.push("tildeSavedUnexpanded=" + (save({ type: "file", target: "~/notes.md" }).target === "~/notes.md"))
+
+    // Refused, and the form says which rule it broke.
+    out.push("relativeRefused=" + (save({ type: "file", target: "notes.md" }) === null))
+    out.push("emptyRefused=" + (save({ type: "file", target: "  " }) === null))
+    // A URL is not a path, whatever the user meant by it.
+    out.push("urlNotAFile=" + (save({ type: "file", target: "https://x.example" }) === null))
+
+    console.log("PICKER " + out.join(" "))
+    Qt.callLater(Qt.quit)
+  }
+}
+QML
+
+out="$(run_scene)"
+results="$(printf '%s' "$out" | sed -n 's/.*PICKER //p')"
+if [[ -z "$results" ]]; then
+  bad "the picker harness reported nothing"
+  printf '%s\n' "$out" | grep -vE "$noise" | tail -8
+else
+  for pair in $results; do
+    case "$pair" in
+      *=true)  pass "${pair%%=*}" ;;
+      *=false) bad "${pair%%=*}" ;;
+      *)       bad "unreadable result: $pair" ;;
+    esac
+  done
+fi
+
+
+
 # "Opening one sheet closes the other" is the panel's policy, not a property of
 # either sheet, and the harness above cannot reach it: calling modal.openFor()
 # directly skips root.openModal(), which is where the policy lives, and the

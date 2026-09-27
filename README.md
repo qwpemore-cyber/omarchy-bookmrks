@@ -8,12 +8,13 @@ links, apps, and commands — one `SUPER + B` away.
 ## What it does
 
 - A panel on the **left edge** that slides in and out.
-- Three kinds of entry, all handled the same way once saved:
+- Four kinds of entry, all handled the same way once saved:
   | type | what it is | example target |
   |------|------------|----------------|
   | `url` | a web address | `https://github.com` |
   | `app` | a desktop entry | `org.gnome.Nautilus` |
   | `cmd` | any command | `omarchy-capture-screenshot` |
+  | `file` | a file or folder | `~/notes.md`, `/etc/hosts` |
 - Add, edit, reorder, and delete entries from the sidebar.
 - Icons resolved from your installed `.desktop` files, falling back to a glyph
   per type.
@@ -42,6 +43,16 @@ Press `a`, pick a type, fill in **Label** (what the list shows) and **Target**
 | `url` | a web address | `https://github.com` |
 | `app` | a desktop entry id, or a bare command | `org.gnome.Nautilus`, `firefox` |
 | `cmd` | any command line | `omarchy-capture-screenshot` |
+| `file` | a full path, or one starting with `~` | `~/notes.md`, `/home/bo/code` |
+
+A `file` entry can be typed or picked: **File…** and **Folder…** fill the same
+Target field, and the field stays editable afterwards. The label is the last
+segment of the path, so `/tmp/My Notes/report.md` is listed as `report.md`. A
+path that is not there yet is still saved — an unmounted drive is not a broken
+bookmark — and `~` is stored as typed and expanded at launch, so a saved panel
+keeps working on a machine with a different user name. A relative path is
+refused: it would mean a different file depending on where the panel was
+started from.
 
 In the form, `j`/`k` and `h`/`l` pick the type, `Return` saves and `Escape`
 cancels, so the whole thing works without touching the pointer. **Icon** is
