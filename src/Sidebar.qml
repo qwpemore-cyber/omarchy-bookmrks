@@ -241,6 +241,22 @@ Item {
     launchEntry(selectedIndex)
   }
 
+  // ---- letter keys ---------------------------------------------------------
+
+  // The catcher consumes the arrow keys and j/k before it gets here, and it
+  // forwards the rest one character at a time. Which characters mean what is
+  // written down once, in one function, so the handler below and the test that
+  // checks the documented map against it cannot drift apart.
+  //
+  // Uppercase is used for the two that shift an entry: j/k are already taken by
+  // moving the cursor, and a capital letter is the same physical key.
+  function keyIntent(t) {
+    if (t === "a" || t === "A") return "add"
+    if (t === "J") return "moveUp"
+    if (t === "K") return "moveDown"
+    return ""
+  }
+
   function openModal(row) {
     if (row >= 0 && row >= listModel.count) return
     modal.openFor(row, row >= 0 ? entryAt(row) : null)
@@ -355,6 +371,14 @@ Item {
         onDeleteRequested: function() {
           if (root.selectedIndex >= 0) root.removeEntry(root.selectedIndex)
         }
+        onTextKey: function(t) {
+          // Adding was reachable only by clicking +, which left a keyboard
+          // user with an empty list able to do nothing at all.
+          if (root.keyIntent(t) === "add") root.openModal(-1)
+          // Reordering had a model, a panel function and no way to reach it.
+          else if (root.keyIntent(t) === "moveUp") root.moveEntry(root.selectedIndex, -1)
+          else if (root.keyIntent(t) === "moveDown") root.moveEntry(root.selectedIndex, 1)
+        }
         onTabRequested: function(direction) {
           // Tab edits the current row, Shift+Tab removes it, so the mouse-only
           // actions stay reachable from the keyboard.
@@ -463,7 +487,7 @@ Item {
 
             Text {
               Layout.fillWidth: true
-              text: "Press + to add a URL, an app, or a command."
+              text: "Press a to add a URL, an app, or a command."
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
               color: Util.alpha(Color.popups.text, 0.4)

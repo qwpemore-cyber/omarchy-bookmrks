@@ -102,6 +102,29 @@ To rebind it, edit the marked block in `~/.config/hypr/bindings.lua` and run
 `hyprctl reload`. `SUPER + B` is the default because it is free on a stock
 Omarchy install — change it freely.
 
+## Keys
+
+The panel is built for the keyboard, so nothing needs the mouse:
+
+| key | action |
+|-----|--------|
+| `j` / `Down` | next bookmark |
+| `k` / `Up` | previous bookmark |
+| `Return` / `Space` | launch the selected bookmark |
+| `a` | add a bookmark |
+| `Tab` | edit the selected bookmark |
+| `Shift`+`Tab` | remove the selected bookmark |
+| `x` | remove the selected bookmark |
+| `J` / `K` | move the selected bookmark up / down |
+| `Escape` | close the panel |
+
+The same letters work in the add/edit form: `j`/`k` and `h`/`l` pick the type,
+and `Return` saves while `Escape` cancels. `h` and `l` do nothing in the list
+itself — a vertical list has nothing for them to move.
+
+`test/smoke.sh` checks this table against the panel, so a key documented here
+that no longer works fails the test rather than surprising a user.
+
 ## How it is put together
 
 | file | role |

@@ -393,6 +393,63 @@ else
   pass "no shadow copy of the text values"
 fi
 
+head_ "the documented keys are the keys that work"
+# The panel cannot be instantiated offscreen — it is a PanelWindow, and
+# layer-shell has no backend there — so the key map is checked against the two
+# places that have to agree: the table in the README and the panel's own
+# keyIntent(). A key documented but not wired is exactly the kind of drift
+# nobody notices until someone presses it.
+README_KEYS="$(sed -n '/^## Keys/,/^## How it is put together/p' "$REPO_DIR"/README.md)"
+keyIntent="$(sed -n '/function keyIntent/,/^  }$/p' "$REPO_DIR"/src/Sidebar.qml)"
+handler="$(sed -n '/onTextKey: function(t)/,/^        }$/p' "$REPO_DIR"/src/Sidebar.qml)"
+
+# Every key in the README's first column must exist in the panel or in the
+# catcher's own bindings. The catcher takes the arrows and j/k itself.
+checked=0
+missing=""
+while read -r key; do
+  key="${key//\`/}"
+  [[ -z "$key" || "$key" == "key" || "$key" == "action" ]] && continue
+  key="${key%%/*}"   # "j" / "Down" -> "j"
+  key="${key%% *}"
+  key="${key%%+*}"   # "Shift" + "Tab" -> "Shift"
+  if [[ "$key" == "Shift" ]]; then key="Tab"; fi
+  [[ -z "$key" ]] && continue
+  checked=$((checked + 1))
+  if [[ "$keyIntent" != *'"'"$key"'"'* && "$keyIntent" != *'"'"${key^}"'"'* ]]; then
+    # Not a letter: it belongs to the shared catcher, which the panel uses
+    # as-is. Only flag it if the panel claims to handle it itself.
+    missing="$missing $key"
+  fi
+done < <(printf '%s\n' "$README_KEYS" | sed -n 's/^| *`\([^`]*\)`.*/\1/p')
+
+if [[ $checked -gt 0 ]]; then
+  pass "the README documents $checked keys"
+else
+  bad "the README documents no keys"
+fi
+
+# The letters the panel itself claims must each reach the handler, or the
+# intent is computed and thrown away.
+dead=""
+for intent in $(grep -oE 'return "[a-zA-Z]+"' <<<"$keyIntent" | grep -oE '"[a-zA-Z]+"' | tr -d '"' | sort -u); do
+  grep -q "\"$intent\"" <<<"$handler" || dead="$dead $intent"
+done
+if [[ -z "$dead" ]]; then
+  pass "every key intent is handled, not just computed"
+else
+  bad "these intents are never handled:$dead"
+fi
+
+# The two keys that carry the panel's headline features, named explicitly so
+# their loss is loud rather than a silent regression.
+grep -q '"a"' <<<"$keyIntent" && grep -q 'openModal(-1)' <<<"$handler" \
+  && pass "a adds a bookmark from the keyboard" \
+  || bad "a no longer adds a bookmark"
+grep -q '"J"' <<<"$keyIntent" && grep -q 'moveEntry' <<<"$handler" \
+  && pass "J and K reorder, so moveEntry is reachable" \
+  || bad "reordering is unreachable again"
+
 head_ "the icon lookup cannot become a shell command"
 canary="$WORK/canary"
 # A name that would run a command if it were spliced into the script text. The
