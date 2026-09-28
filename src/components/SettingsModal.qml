@@ -38,8 +38,11 @@ Item {
   // signal that said "here are the bookmarks" and quietly meant "replace these
   // bookmarks" is how a settings page deletes a list.
   signal exportRequested(string path)
-  signal replaceRequested(var bookmarks)
-  signal mergeRequested(var bookmarks)
+  // The whole parsed file, not a list of rows: a v2 file's top level holds
+  // folders as well as bookmarks, and a list of the top level would arrive at
+  // the panel with the children already lost.
+  signal replaceRequested(var state)
+  signal mergeRequested(var state)
 
   // Where the panel keeps the bookmarks. The default repeats the panel's own
   // expression so the sheet is right on its own, and Sidebar overwrites it
@@ -59,6 +62,13 @@ Item {
   // thing as an empty array: a file with no bookmarks in it is a real answer,
   // and "replace" with it would empty the panel.
   property var pendingImport: null
+  // How many rows the incoming file holds, folders and their children included.
+  // Counting the top level alone would say "3 bookmarks" for a file with a
+  // folder of forty in it, which is the kind of number a person makes a
+  // decision on.
+  readonly property int pendingCount: pendingImport === null
+    ? 0
+    : Model.flatten(pendingImport).length
   // One line saying what an import did, because a sheet that closes over a
   // successful import and shows nothing leaves the user guessing whether it
   // worked -- and the two ways in look identical once the list is rebuilt.
@@ -114,7 +124,7 @@ Item {
       // destructive option and an Escape key is one keystroke away from
       // replacing a list with nothing, and there is no honest way to label an
       // Escape-to-cancel key that also means the destructive one.
-      root.pendingImport = Model.parse(raw).bookmarks
+      root.pendingImport = Model.parse(raw)
     }
     onLoadFailed: root.mergeRequested(null)
   }
@@ -297,8 +307,8 @@ Item {
         Text {
           Layout.fillWidth: true
           text: root.pendingImport === null ? ""
-            : "That file has " + root.pendingImport.length
-              + (root.pendingImport.length === 1 ? " bookmark." : " bookmarks.")
+            : "That file has " + root.pendingCount
+              + (root.pendingCount === 1 ? " bookmark." : " bookmarks.")
           font.family: Style.font.family
           font.pixelSize: Style.font.body
           color: Util.alpha(Color.popups.text, 0.7)

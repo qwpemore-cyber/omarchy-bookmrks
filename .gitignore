@@ -7,3 +7,7 @@
 # Local copies of the user's own bookmark list. The example file is tracked;
 # a real one must never be committed.
 bookmarks.json
+
+# The editor config is per machine, and committing it only ever fights
+# whoever clones next.
+.vscode/

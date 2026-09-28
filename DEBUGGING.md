@@ -25,15 +25,22 @@ Two things are true about this project and they explain most surprises:
 | Panel appears white or unthemed | nothing — it is not the plugin | See "Read this first"; run it through the shell |
 | Old code still running after an edit | nothing — it is not the plugin | `omarchy restart shell`; QML has no hot reload |
 | Errors in the log after a change | `src/Sidebar.qml` | The panel root: data path, model, key handling, launch |
-| A row renders wrong, or the wrong icon | `src/components/BookmarkItem.qml` | One row's layout and its type glyph |
-| Add or edit form misbehaves | `src/components/AddBookmarkModal.qml` | Field validation, the type cycle, focus |
+| A row renders wrong, indented wrongly, or shows the wrong icon | `src/components/BookmarkItem.qml` | One row's layout: indent, chevron, kind glyph, pin mark |
+| Add or edit form misbehaves | `src/components/AddBookmarkModal.qml` | Field validation, the kind and type cycles, focus |
+| A row will not indent or outdent | `src/BookmarkModel.js` → `canIndent`, `indent`, `outdent` | The rules about which row can move where |
+| A nested row is edited or deleted and the wrong one changes | `src/Sidebar.qml` → `viewOptions` | Every mutation is addressed by row in the current projection |
 | Settings sheet looks wrong | `src/components/SettingsModal.qml` | Its own layout; the data path is handed to it by the panel |
-| An entry will not save, or saves wrong | `src/BookmarkModel.js` → `normalize`, `validate` | Every field is checked here, once |
-| A URL, app or command launches the wrong thing | `src/BookmarkModel.js` → `launchArgv` | The exact argv per type; the only place it is built |
-| An icon never appears | `src/BookmarkModel.js` → `iconFor` | Desktop lookup, then the per-type glyph |
+| An entry will not save, or saves wrong | `src/BookmarkModel.js` → `normalizeNode` | Every field is checked here, once |
+| An old `version: 1` file looks wrong or empty | `src/BookmarkModel.js` → `itemsOf`, `fromObject` | The v1 shape is read here, and rewritten as v2 on the next save |
+| A URL, app or command launches the wrong thing | `src/BookmarkModel.js` → `argvFor` | The exact argv per type; the only place it is built. A folder and a section have none |
+| An icon never appears | `src/Sidebar.qml` → `refreshIcons`, `pumpIconQueue` | The desktop lookup runs here, one at a time through a single Process |
 | `SUPER + B` does nothing | `install.sh` and `~/.config/hypr/bindings.lua` | The binding block is written by the installer, not by the panel |
 | Data is not being saved | `src/Sidebar.qml` → `dataPath` | One expression; the settings sheet is told this value |
-| A quoted or `$`-containing target misbehaves | `src/BookmarkModel.js` → `launchArgv`, `iconFor` | Both build command lines; neither may concatenate |
+| A quoted or `$`-containing target misbehaves | `src/BookmarkModel.js` → `argvFor`; `src/Sidebar.qml` → `pumpIconQueue` | The one is an argv array, the other passes the desktop id as a positional parameter; neither concatenates |
+| an export produced an empty or missing file | `Sidebar.qml` → `exportTo` | `setText` right after setting `path`; the write is async and has to be waited on with `onFileChanged` |
+| importing wiped the list | `Sidebar.qml` → `mergeImported` | a file that failed the `looksLikeOurFile()` check was read as zero bookmarks, then replaced |
+| a filter or a folded folder edited the wrong row | `Sidebar.qml` → `viewOptions` | an action addressed the view row without the same options the list was drawn with |
+| the desktop is unusable while the panel is open | `Sidebar.qml` | `WlrLayershell.keyboardFocus`: `keyboardFocus: opened && !root.overlayOpen` |
 
 ## Where each kind of check lives
 
@@ -55,7 +62,8 @@ Each of these was a real bug here, and each has a check that now fails if it
 comes back:
 
 - **Never build a command line by concatenation.** Use positional parameters
-  (`"$1"`, never `eval`). See `iconFor`.
+  (`"$1"`, never `eval`), and an argv array where there is one. See
+  `argvFor` and the icon lookup in `Sidebar.qml`.
 - **One authority per value.** The data path, the key map, and the type list
   each exist in exactly one place; a second copy is a second answer.
 - **A sheet over the list owns the surface.** Anything that acts on the list
@@ -74,8 +82,21 @@ comes back:
 - **A documented verb is a verb that exists.** The README is compared against
   the source, in both directions.
 - **A filter changes the view, never the data.** Hiding rows renumbers the ones
-  that are left, so every action aimed at a visible row is translated through
-  `fullRowFor()` into the full list first. See `Model.filterIndexes`.
+  that are left, so the panel resolves a row once, through `viewOptions()`, and
+  hands the *same* options to every model call. There is no second index to
+  fall out of step with the list that is on screen. See `Model.flatten` and
+  `Model.nodeAtRow`.
+- **A row is addressed by its id, not its number.** Row numbers depend on which
+  folders are open and what is in the filter box, neither of which a script can
+  see — so every verb takes an id as well, and a bare number still means a row
+  number.
+- **A node that cannot be run is refused, not approximated.** `argvFor` returns
+  nothing for a folder and for a section, so there is no code path where one of
+  them reaches a shell.
+- **Nothing that loses data is silent.** A folder that still holds things
+  refuses to become a bookmark; a section carries no `pinned` key at all,
+  because a field in a hand-edited file that does nothing is worse than no
+  field; and the first v2 write leaves the v1 original at `bookmarks.json.bak`.
 - **A save is asynchronous.** `FileView.setText()` returns before the bytes
   land, so anything that reads a file straight after writing it sees a file
   that exists and is empty. Wait on `onFileChanged`, which is what the panel's
@@ -87,7 +108,3 @@ comes back:
   not this plugin's format, and "nothing picked" (`null`) is a different answer
   from "a file with no bookmarks" (`[]`), because only one of those followed by
   a replace loses work.
-| an export produced an empty or missing file | `setText` right after setting `path`; the write is async and has to be waited on with `onFileChanged` |
-| importing wiped the list | a file that failed the `looksLikeOurFile()` check was read as zero bookmarks, then replaced |
-| the filter deletes the wrong bookmark | an action addressed the view row instead of `fullRowFor(viewRow)` |
-| the desktop is unusable while the panel is open | `WlrLayershell.keyboardFocus` in `Sidebar.qml` | `keyboardFocus: opened && !root.overlayOpen` |

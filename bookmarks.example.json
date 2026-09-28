@@ -1,9 +1,77 @@
 {
-  "version": 1,
-  "bookmarks": [
-    { "id": "a1b2c3d4", "type": "url",  "label": "GitHub",     "target": "https://github.com",              "icon": "" },
-    { "id": "e5f6g7h8", "type": "app",  "label": "Files",      "target": "org.gnome.Nautilus",             "icon": "org.gnome.Nautilus" },
-    { "id": "i9j0k1l2", "type": "cmd",  "label": "Screenshot", "target": "omarchy-capture-screenshot",      "icon": "" },
-    { "id": "m3n4o5p6", "type": "file", "label": "Notes",      "target": "~/Documents/notes.md",            "icon": "" }
+  "version": 2,
+  "items": [
+    {
+      "id": "sec001",
+      "kind": "section",
+      "label": "Daily",
+      "icon": ""
+    },
+    {
+      "id": "fold01",
+      "kind": "folder",
+      "label": "Code",
+      "icon": "",
+      "items": [
+        {
+          "id": "a1b2c3d4",
+          "kind": "bookmark",
+          "type": "url",
+          "label": "GitHub",
+          "target": "https://github.com",
+          "icon": "",
+          "pinned": true
+        },
+        {
+          "id": "e5f6g7h8",
+          "kind": "bookmark",
+          "type": "app",
+          "label": "Files",
+          "target": "org.gnome.Nautilus",
+          "icon": "org.gnome.Nautilus",
+          "pinned": false
+        },
+        {
+          "id": "fold02",
+          "kind": "folder",
+          "label": "Servers",
+          "icon": "",
+          "items": [
+            {
+              "id": "i9j0k1l2",
+              "kind": "bookmark",
+              "type": "cmd",
+              "label": "Up",
+              "target": "uptime",
+              "icon": "",
+              "pinned": false
+            },
+            {
+              "id": "m3n4o5p6",
+              "kind": "bookmark",
+              "type": "file",
+              "label": "Notes",
+              "target": "~/Documents/notes.md",
+              "icon": "",
+              "pinned": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sep001",
+      "kind": "separator",
+      "icon": ""
+    },
+    {
+      "id": "p7q8r9s0",
+      "kind": "bookmark",
+      "type": "cmd",
+      "label": "Screenshot",
+      "target": "omarchy-capture-screenshot",
+      "icon": "",
+      "pinned": false
+    }
   ]
 }

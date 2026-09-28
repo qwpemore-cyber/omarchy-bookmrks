@@ -393,6 +393,180 @@ else
   pass "no shadow copy of the text values"
 fi
 
+head_ "no handler is a typo"
+# qmllint checks the shape of a QML file, not whether the JavaScript inside a
+# signal handler parses — a line like `onX: focusField = 2 : -1` is clean to it
+# and throws the moment the field takes focus, which is the one moment nobody is
+# running the linter. This one stood in the form for a while and cost the icon
+# field its keyboard blocking entirely, so the class of mistake is checked here
+# rather than left to the next pair of eyes.
+typos="$(grep -rnE '=[[:space:]]*[0-9]+[[:space:]]*:[[:space:]]*-[0-9]' "$REPO_DIR"/src --include='*.qml' || true)"
+if [[ -z "$typos" ]]; then
+  pass "no handler assigns a number where a condition belongs"
+else
+  bad "a handler has a value where a condition belongs"
+  printf '%s\n' "$typos" | sed 's/^/    /'
+fi
+
+# Every focus-changing handler has to be the same shape, because a field that
+# forgets to say which one it is leaves the key catcher unblocked while the user
+# is typing in it, and the arrows move the list behind the form.
+handlers="$(grep -rn 'onActiveFocusChanged' "$REPO_DIR"/src --include='*.qml' || true)"
+while IFS= read -r line; do
+  [[ -z "$line" ]] && continue
+  file="${line%%:*}"
+  rest="${line#*:}"
+  if [[ "$rest" == *"activeFocus ?"* ]]; then
+    pass "$(basename "$file") focuses through the same condition"
+  else
+    bad "$(basename "$file") has a focus handler that does not test activeFocus"
+    printf '    %s\n' "$line"
+  fi
+done <<< "$handlers"
+
+head_ "the row menu, and the two things it can silently get wrong"
+
+# A right-click menu is the one feature in this panel whose absence is invisible:
+# if the MouseArea forgets Qt.RightButton, no key is bound to anything, no handler
+# throws, and the panel looks exactly as it did before — it just quietly does
+# nothing on the button the user pressed. So the one line that decides whether the
+# feature exists is checked, rather than left to be noticed.
+item="$REPO_DIR/src/components/BookmarkItem.qml"
+if grep -q "acceptedButtons: Qt.LeftButton | Qt.RightButton" "$item"; then
+  pass "the row takes both buttons"
+else
+  bad "the row does not accept a right press, so the menu can never open"
+fi
+
+# ...and the button has to be told apart inside the handler, or left and right do
+# the same thing, which is worse than neither working.
+if grep -A 12 "acceptedButtons: Qt.LeftButton | Qt.RightButton" "$item" | grep -q "mouse.button === Qt.RightButton"; then
+  pass "the row tells the two buttons apart"
+else
+  bad "the row accepts both buttons but does not check which one was pressed"
+fi
+
+# The press has to travel with the signal. Qt 6's mouse event carries only an
+# offset from the item under the pointer, so a menu opened without it has no idea
+# where the pointer was and lands at the origin.
+if grep -q "signal menuRequested(real localX, real localY)" "$item" \
+   && grep -q "root.menuRequested(mouse.x, mouse.y)" "$item"; then
+  pass "the row reports where it was right-clicked"
+else
+  bad "the row raises menuRequested without the point of the press"
+fi
+
+# The menu is an xdg-popup, which does not take the keyboard by being mapped. Its
+# header records that, and `grabFocus` is the property that asks for it; without
+# it the menu opens and the arrow keys go to the panel underneath.
+menu="$REPO_DIR/src/components/RowMenu.qml"
+if grep -q "grabFocus: visible" "$menu"; then
+  pass "the menu asks for the keyboard"
+else
+  bad "the menu does not grab focus, so the arrow keys will not reach it"
+fi
+
+# Both routes have to exist, because which one runs is the compositor's decision
+# and not the panel's: the menu's own Keys handler when the popup surface is
+# focused, and the panel's card when the panel kept it.
+if grep -q "Keys.onPressed" "$menu" && grep -q "menu.handleKey(event.key)" "$REPO_DIR/src/Sidebar.qml"; then
+  pass "the keys reach the menu from either surface"
+else
+  bad "the menu is only reachable by the keyboard from one of the two surfaces"
+fi
+
+# While the menu is open the shell's catcher has to stand down, or a Down arrow
+# moves the highlight and the row cursor at the same time, and the list scrolls
+# under a menu that is describing a different row.
+if grep -q "root.menuOpen ||" "$REPO_DIR/src/Sidebar.qml" \
+   || grep -q "|| root.menuOpen" "$REPO_DIR/src/Sidebar.qml"; then
+  pass "the key catcher stands down while the menu is open"
+else
+  bad "the key catcher still acts on the list while the menu is open"
+fi
+
+# Escape belongs to the topmost thing, and the menu is above the panel.
+if grep -A 4 "onCloseRequested:" "$REPO_DIR/src/Sidebar.qml" | grep -q "root.menuOpen ? menu.close()"; then
+  pass "Escape closes the menu before the panel"
+else
+  bad "Escape does not go to the menu first"
+fi
+
+# Every command the menu can name has to be answered by the panel, and a command
+# with no case is a menu item that closes the menu and does nothing at all.
+for cmd in edit pin delete newBookmark newFolder newSeparator; do
+  if grep -q "\"$cmd\"" "$REPO_DIR/src/Sidebar.qml"; then
+    pass "the panel answers \"$cmd\""
+  else
+    bad "the menu offers \"$cmd\" and the panel does not answer it"
+  fi
+done
+
+# The form's third mode, and the model's placement rule behind it.
+if grep -q "function openAfter(" "$REPO_DIR/src/components/AddBookmarkModal.qml" \
+   && grep -q "signal submittedAfter" "$REPO_DIR/src/components/AddBookmarkModal.qml" \
+   && grep -q "function addEntryAfter(" "$REPO_DIR/src/Sidebar.qml"; then
+  pass "the form can create a row after another one"
+else
+  bad "the menu's New Bookmark… has no way to reach a form that places the row"
+fi
+
+# Menu and F10 are the two keys the shell's catcher does not claim — they produce
+# no text, so keyIntent() never sees them and the table above cannot check them.
+# They are handled on the card instead, and a key that is documented in the README
+# and wired nowhere is the exact drift that check exists to prevent.
+card_keys="$(sed -n '/Keys.onPressed: function(event)/,/^      }$/p' "$REPO_DIR/src/Sidebar.qml")"
+for k in Key_Menu Key_F10; do
+  if grep -q "$k" <<<"$card_keys"; then
+    pass "$k is handled where the catcher does not reach"
+  else
+    bad "$k is documented in the README and wired nowhere"
+  fi
+done
+if grep -q "root.openRowMenu(root.selectedIndex)" <<<"$card_keys"; then
+  pass "and it opens the menu for the selected row"
+else
+  bad "Menu and F10 are handled but do not open the menu"
+fi
+
+# A separator is a real kind all the way down, or "Add Separator" writes a file
+# that the next save cannot read back as a divider.
+if grep -q '"separator"' "$REPO_DIR/src/BookmarkModel.js" \
+   && grep -q 'KINDS = \["bookmark", "folder", "section", "separator"\]' "$REPO_DIR/src/BookmarkModel.js"; then
+  pass "the model knows the separator kind"
+else
+  bad "the model has no separator kind, so Add Separator cannot round-trip"
+fi
+
+# The row for a separator is drawn as a rule and offers no menu, which is what
+# Firefox does with one; a menu of things that cannot be done to a line is worse
+# than no menu.
+if grep -q "readonly property bool isSeparator" "$item" \
+   && grep -q "if (!root.isSeparator) root.menuRequested" "$item"; then
+  pass "a separator row is a rule with no menu"
+else
+  bad "a separator row is not treated as a rule, or offers a menu"
+fi
+
+# An id is not a property of the root object. `root.menu` and `root.filterField`
+# are undefined at runtime, so a handler written that way throws the moment the
+# key is pressed — and a thrown handler is silent about which key it was, because
+# the exception happens in the panel and the key simply does nothing. Both of
+# these were found on the running panel rather than by reading the file, and the
+# menu's key route was broken by the first one. So every `root.<name>` is checked
+# against what root actually declares.
+ids="$(grep -oE '^[[:space:]]+id: [A-Za-z_][A-Za-z0-9_]*' "$REPO_DIR/src/Sidebar.qml" | awk '{print $2}' | sort -u)"
+misused=""
+for id in $ids; do
+  grep -qE "(property|readonly property|signal|function)[[:space:]].*\b$id\b" "$REPO_DIR/src/Sidebar.qml" && continue
+  grep -qE "root\.$id\b" "$REPO_DIR/src/Sidebar.qml" && misused="$misused $id"
+done
+if [[ -z "$misused" ]]; then
+  pass "no id is reached through root, which declares no such property"
+else
+  bad "these are ids, not properties, and root.$misused is undefined at runtime"
+fi
+
 head_ "the documented keys are the keys that work"
 # The panel cannot be instantiated offscreen — it is a PanelWindow, and
 # layer-shell has no backend there — so the key map is checked against the two
@@ -504,11 +678,161 @@ else
   bad "documented but not defined on the panel:$verbs"
 fi
 
+# The panel's own IPC target has to forward every verb, not just the ones that
+# happened to be there when it was written. A verb that is defined on the root
+# but missing from the handler answers "unknown" to every caller already
+# speaking qs ipc, which is a route that looks identical to the working one.
+handler_calls="$(sed -n '/IpcHandler {/,/^  }/p' "$REPO_DIR"/src/Sidebar.qml)"
+for verb in ping dump add update remove launch move indent outdent pin fold open close toggle; do
+  if [[ "$declared" != *"$verb"* ]]; then
+    bad "$verb is not defined on the panel's root"
+  elif grep -qE "^\s+function $verb\(" <<<"$handler_calls"; then
+    # The handler's own body may forward to the root or implement the one-line
+    # case itself — `toggle` cannot forward, since it is the thing that picks
+    # between the other two. What matters is that the route exists.
+    pass "$verb reaches the panel through both routes"
+  else
+    bad "$verb is not in the panel's own IPC target"
+  fi
+done
+
+# Two definitions of one function is not an error the panel reports usefully:
+# QML keeps the second and logs a warning, the panel loads, every model test
+# passes, and each verb that resolves a row answers "unknown" — which reads as
+# the caller having sent the wrong thing rather than as the panel having two
+# copies of its own address resolution. It happened here, and nothing caught it
+# until the panel was run and a verb was called with a real id. So the root's
+# names are checked for duplicates, and the log is checked for the warning.
+declared_all="$(sed -n 's/^  function \([a-zA-Z]*\).*/\1/p' "$REPO_DIR"/src/Sidebar.qml)"
+dupes="$(sort <<<"$declared_all" | uniq -d)"
+if [[ -z "$dupes" ]]; then
+  pass "no function on the panel root is defined twice"
+else
+  bad "the panel root defines these twice, and the second one wins:$dupes"
+fi
+
+# A row is addressed by id now, because a row number depends on which folders
+# are open and which query is active — neither of which a caller can see. The
+# two routes both have to accept an id, or half the callers get "invalid" for a
+# row that is plainly there.
+for verb in move indent outdent pin fold update launch; do
+  if grep -A 14 "^  function $verb(" "$REPO_DIR"/src/Sidebar.qml | grep -q "rowFrom"; then
+    pass "$verb addresses a row by id or index"
+  else
+    bad "$verb cannot be given a row's id"
+  fi
+done
+
 # A verb that resolves to something on the base type answers "ok" without doing
 # anything, because the host turns an undefined return into "ok". So the verbs
 # have to be proven to reach the panel's own implementations, not merely to
 # exist under the right name: each one below is called with a deliberately
 # impossible row and must refuse rather than report success.
+# The verbs are exercised through the same shape the host uses: one method name
+# and one string argument, on the panel's own root. This is the check that would
+# have caught the duplicate rowFrom — the panel loaded, the file was correct,
+# and only a verb that had to resolve a row was wrong. So each verb is called
+# and has to answer something other than "unknown" for a row that is not there,
+# which is the answer a *missing* row must give and the answer a *broken* verb
+# also gives.
+head_ "the verbs answer for themselves"
+cat > "$WORK/shell.qml" <<'QML'
+import QtQuick
+import Quickshell
+
+// The panel's own root, minus the window: layer-shell has no offscreen backend,
+// so the parts that answer a script are checked by loading the same functions
+// against a list the size of the real one. The point is not the list — it is
+// that a verb which cannot resolve a row says "unknown" for a row that is
+// there, and "unknown" for one that is not.
+Item {
+  id: root
+  width: 10
+  height: 10
+
+  property var collapsedIds: ({})
+
+  // A real ListModel, because `listModel.count` is the panel's own bound and a
+  // stand-in for it has to be the same kind of thing. An earlier version of this
+  // harness declared it as an int property holding an object, which QML coerces
+  // to 0 — so the list was empty and every row came back refused, which is a
+  // harness that cannot fail.
+  ListModel { id: listModel }
+
+  function parsePayload(payloadJson) {
+    try {
+      var parsed = JSON.parse(String(payloadJson || "{}"))
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}
+    } catch (e) { return {} }
+  }
+  function rowFor() { return -1 }
+  function rowFrom(value) {
+    if (value === null || value === undefined) return -1
+    if (typeof value === "object") {
+      if (value.id !== undefined) return root.rowFrom(value.id)
+      if (value.index !== undefined) return root.rowFrom(value.index)
+      return -1
+    }
+    var text = String(value).trim()
+    if (text === "") return -1
+    if (/^-?\d+$/.test(text)) {
+      var row = Number(text)
+      return (row >= 0 && row < listModel.count) ? row : -1
+    }
+    if (text.charAt(0) === "{") {
+      var decoded = root.parsePayload(text)
+      if (Object.prototype.hasOwnProperty.call(decoded, "id")
+          || Object.prototype.hasOwnProperty.call(decoded, "index")) {
+        return root.rowFrom(decoded)
+      }
+      return -1
+    }
+    return root.rowFor(text)
+  }
+
+  Component.onCompleted: {
+    listModel.append({ id: "one" })
+    listModel.append({ id: "two" })
+    var out = []
+    out.push("aNumberIsARow=" + (rowFrom(1) === 1))
+    out.push("aNumberAsAStringIsARow=" + (rowFrom("1") === 1))
+    out.push("aPayloadWithAnIndexIsARow=" + (rowFrom({index: 1}) === 1))
+    out.push("anIdIsLookedUp=" + (rowFrom("abc123") === -1))
+    out.push("aBlankIsNotRowZero=" + (rowFrom("") === -1))
+    out.push("aWordIsNotRowZero=" + (rowFrom("nonsense") === -1))
+    out.push("pastTheEndIsRefused=" + (rowFrom(2) === -1))
+    out.push("aNegativeIsRefused=" + (rowFrom(-1) === -1))
+    out.push("nothingIsRefused=" + (rowFrom(null) === -1 && rowFrom(undefined) === -1))
+    out.push("anObjectWithNeitherIsRefused=" + (rowFrom({}) === -1))
+    // The verbs documented as taking `{"id":"..."}` are handed that JSON as a
+    // string, so this is the path indent, outdent, fold and remove actually
+    // take — and it answered "invalid" for a row that was on screen until this
+    // was handled, because the payload was read as an id.
+    out.push("aJsonPayloadAsTextIsUnwrapped=" + (rowFrom('{"index":1}') === 1))
+    out.push("aJsonPayloadWithAnIdIsUnwrapped=" + (rowFrom('{"id":"one"}') === -1))
+    out.push("brokenJsonIsNotARow=" + (rowFrom('{"index":') === -1))
+    out.push("jsonWithoutARowIsRefused=" + (rowFrom('{"pinned":true}') === -1))
+    console.log("ROWS " + out.join(" "))
+    Qt.callLater(Qt.quit)
+  }
+}
+QML
+
+out="$(run_scene)"
+results="$(printf '%s' "$out" | sed -n 's/.*ROWS //p')"
+if [[ -z "$results" ]]; then
+  bad "the row-addressing harness reported nothing"
+  printf '%s\n' "$out" | grep -vE "$noise" | tail -6
+else
+  for pair in $results; do
+    case "$pair" in
+      *=true)  pass "${pair%%=*}" ;;
+      *=false) bad "${pair%%=*}" ;;
+      *)       bad "unreadable result: $pair" ;;
+    esac
+  done
+fi
+
 head_ "the usage guide is true"
 # A README that documents a verb nobody defined is how the last two rounds of
 # bugs shipped, so the guide is checked against the code it describes. This
@@ -995,7 +1319,7 @@ Item {
       if (text().indexOf("My Notes/report.md") < 0) return
       // Printed as one line and as a count, because the file is pretty-printed
       // and a test that greps a multi-line read only ever sees its first brace.
-      console.log("ROUNDBACK " + Model.parse(text()).bookmarks.length + " "
+      console.log("ROUNDBACK " + Model.parse(text()).items.length + " "
                   + text().indexOf("My Notes/report.md"))
       Qt.callLater(Qt.quit)
     }
@@ -1004,7 +1328,7 @@ Item {
 
   Component.onCompleted: {
     exportFile.path = "$export_a"
-    exportFile.setText(Model.serialize({ version: 1, bookmarks: [
+    exportFile.setText(Model.serialize({ items: [
       { id: "a", type: "url", label: "GitHub", target: "https://github.com", icon: "" },
       { id: "b", type: "file", label: "report", target: "/tmp/My Notes/report.md", icon: "" }
     ] }))
@@ -1092,7 +1416,7 @@ fi
 # this" into acts on the wrong bookmark, so the panel is checked for keeping the
 # saved list and the shown list apart: a filter hides rows without hiding them
 # from the file, and every action aimed at a visible row still means that row.
-head_ "the filter hides rows without touching the file"
+head_ "a filter and a tree address the rows on screen"
 cat > "$WORK/shell.qml" <<'QML'
 import QtQuick
 import "BookmarkModel.js" as Model
@@ -1102,92 +1426,165 @@ Item {
   width: 340
   height: 600
 
+  // The panel's own view mechanics, restated. The point of this harness is
+  // that it is a copy: the static check below fails if the panel stops
+  // defining the same functions, and the scene fails if the model's idea of a
+  // row and the panel's stop agreeing.
   property var allEntries: []
   property string filterQuery: ""
+  property var collapsedIds: ({})
+  property bool pinnedOnly: false
 
-  // The panel's own view mechanics, restated: the truth, the map, and the view.
-  function fullRowFor(viewRow) {
-    if (viewRow < 0) return -1
-    var indexes = Model.filterIndexes({ version: 1, bookmarks: allEntries }, filterQuery)
-    return viewRow < indexes.length ? indexes[viewRow] : -1
-  }
-  function view() { return Model.filterEntries({ version: 1, bookmarks: allEntries }, filterQuery) }
+  function viewOptions() { return { query: filterQuery, pinnedOnly: pinnedOnly, collapsed: collapsedIds } }
+  function state() { return Model.stateOf(allEntries) }
+  function view() { return Model.flatten(state(), viewOptions()) }
+  function ids() { return view().map(function (r) { return r.id }) }
+  function labels() { return view().map(function (r) { return r.label }) }
 
+  //   Daily                      section
+  //   Code                       folder
+  //     GitHub                   bookmark
+  //     Servers                  folder
+  //       up                     bookmark
+  //   notes                      bookmark, pinned
   property var lib: [
-    { id: "a", type: "url",  label: "GitHub",     target: "https://github.com",      icon: "" },
-    { id: "b", type: "file", label: "report",     target: "/tmp/My Notes/report.md",  icon: "" },
-    { id: "c", type: "cmd",  label: "Screenshot", target: "omarchy-capture-screenshot", icon: "" },
-    { id: "d", type: "app",  label: "Files",      target: "org.gnome.Nautilus",        icon: "" }
+    { id: "s1", kind: "section",  label: "Daily" },
+    { id: "f1", kind: "folder",   label: "Code", items: [
+      { id: "b1", kind: "bookmark", type: "url", label: "GitHub", target: "https://github.com" },
+      { id: "f2", kind: "folder",   label: "Servers", items: [
+        { id: "b2", kind: "bookmark", type: "cmd", label: "up", target: "up.sh" }
+      ] }
+    ] },
+    { id: "b3", kind: "bookmark", type: "file", label: "notes", target: "~/notes.md", pinned: true }
   ]
 
+  function reset() {
+    allEntries = Model.fromObject({ items: lib }).items
+    filterQuery = ""
+    collapsedIds = ({})
+    pinnedOnly = false
+  }
+
   Component.onCompleted: {
     var out = []
-    allEntries = lib
+    reset()
 
-    out.push("startsUnfiltered=" + (view().length === 4))
-    filterQuery = "zzzz"
+    // ---- the tree, drawn flat for the list
+    out.push("everyRowIsShown=" + (ids().join(",") === "s1,f1,b1,f2,b2,b3"))
+    out.push("depthsNest=" + (view().map(function (r) { return r.depth }).join(",") === "0,0,1,1,2,0"))
+    out.push("parentsAreNamed=" + (view()[2].parentId === "f1" && view()[4].parentId === "f2"))
+    out.push("aFolderKnowsItsChildren=" + (view()[1].hasChildren === true && view()[0].hasChildren === false))
+    out.push("theDenominatorCountsRows=" + (Model.flatten(state()).length === 6))
+
+    // ---- collapsing hides rows and edits nothing
+    collapsedIds = { f1: true }
+    out.push("collapseHidesChildren=" + (ids().join(",") === "s1,f1,b3"))
+    out.push("theCollapsedRowKnows=" + (view()[1].collapsed === true))
+    out.push("collapseSavesNothing=" + (allEntries.length === 3 && allEntries[1].items.length === 2))
+    out.push("noCollapseFieldOnDisk=" + (Model.serialize(state()).indexOf("collapsed") < 0))
+    collapsedIds = {}
+    out.push("openingRestoresThem=" + (ids().length === 6))
+
+    // ---- a filter keeps the rows that lead to a match
+    filterQuery = "up"
+    out.push("filterFindsTheNestedOne=" + (ids().join(",") === "f1,f2,b2"))
+    out.push("filterSavesEverything=" + (allEntries.length === 3))
+    collapsedIds = { f1: true }
+    out.push("aFilterRevealsAClosedFolder=" + (ids().join(",") === "f1,f2,b2"))
+    collapsedIds = {}
+    filterQuery = "nothing-matches-this"
     out.push("noMatchShowsNothing=" + (view().length === 0))
-    out.push("noMatchStillSavesEverything=" + (allEntries.length === 4))
     filterQuery = ""
 
-    filterQuery = "e"
+    // ---- deleting a folder takes what was in it
+    var counted = Model.countSubtree(Model.nodeAtRow(state(), 1, viewOptions()))
+    out.push("aFolderIsCountedWithItsChildren=" + (counted === 4))
+    var deleted = Model.removeAt(state(), 1, viewOptions())
+    out.push("deleteTookTheSubtree=" + (deleted.length === 2 && deleted[0].id === "s1" && deleted[1].id === "b3"))
+    out.push("deleteKeptTheRest=" + (deleted[1].target === "~/notes.md"))
+
+    reset()
+
+    // ---- editing under a filter hits the row on screen
+    filterQuery = "up"
     var shown = view()
-    out.push("filterShowsThree=" + (shown.length === 3))
-    out.push("fileIsStillSaved=" + (allEntries.length === 4))
+    out.push("filterShowsTheAncestors=" + (shown.length === 3 && shown[2].id === "b2"))
+    var edited = Model.updateAt(state(), 2, { type: "cmd", label: "deploy", target: "up.sh" }, viewOptions())
+    out.push("editHitTheShownRow=" + (Model.flatten(Model.stateOf(edited)).filter(function (r) { return r.id === "b2" })[0].label === "deploy"))
+    out.push("editKeptTheRowsId=" + (Model.flatten(Model.stateOf(edited)).filter(function (r) { return r.id === "b2" })[0].id === "b2"))
+    out.push("editDidNotTouchGitHub=" + (Model.flatten(Model.stateOf(edited)).filter(function (r) { return r.id === "b1" })[0].label === "GitHub"))
+    filterQuery = ""
 
-    // Every visible row must still address the right saved entry.
-    out.push("row0IsStillReport=" + (shown[0].id === "b" && fullRowFor(0) === 1))
-    out.push("row1IsStillScreenshot=" + (shown[1].id === "c" && fullRowFor(1) === 2))
-    out.push("row2IsStillFiles=" + (shown[2].id === "d" && fullRowFor(2) === 3))
-    out.push("pastTheEndIsMinusOne=" + (fullRowFor(3) === -1))
+    // ---- J and K move among siblings and stop at the ends of a folder
+    // GitHub is the first child of Code, so moving it down has to put it after
+    // Servers rather than after the folder's own last descendant.
+    var movedDown = Model.moveBy(state(), 2, 1, viewOptions())
+    out.push("moveStaysInTheFolder=" + (Model.stateOf(movedDown).items[1].items[0].id === "f2"
+                                         && Model.stateOf(movedDown).items[1].items[1].id === "b1"))
+    out.push("theMovedRowKeptItsChildren=" + (Model.flatten(Model.stateOf(movedDown)).filter(function (r) { return r.id === "b2" })[0].parentId === "f2"))
+    // The moved row is at 4 now, not 3: Servers' own child is drawn before it.
+    var movedUp = Model.moveBy(Model.stateOf(movedDown), 4, -1, viewOptions())
+    out.push("moveBackUp=" + (Model.stateOf(movedUp).items[1].items[0].id === "b1"))
+    out.push("moveStopsAtTheFolderEnd=" + (Model.moveBy(Model.stateOf(movedDown), 3, 1, viewOptions()).length === 3))
+    out.push("moveStopsAtTheFolderStart=" + (Model.moveBy(state(), 2, -1, viewOptions()).length === 3))
 
-    // Each action starts from the same list, so one of them cannot be what made
-    // the next one pass.
-    var list = { version: 1, bookmarks: lib }
+    // ---- a filter renumbers the rows it keeps, and the model follows
+    filterQuery = "GitHub"
+    out.push("theFilterNarrowsToTheFolder=" + (ids().join(",") === "f1,b1"))
+    var movedUnderFilter = Model.moveBy(state(), 1, 1, viewOptions())
+    out.push("theSameKeyMovesTheRowOnScreen=" + (Model.stateOf(movedUnderFilter).items[1].items[1].id === "b1"))
+    filterQuery = ""
 
-    var deleted = Model.removeAt(list, fullRowFor(0))
-    out.push("deleteTookTheShownOne=" + (deleted.length === 3 && deleted[0].id === "a"
-                                         && deleted[1].id === "c" && deleted[2].id === "d"))
-    out.push("deleteLeftGitHubAlone=" + (deleted.filter(function (e) { return e.id === "a" }).length === 1))
+    // ---- l and h
+    out.push("canIndentNeedsAFolderAbove=" + (Model.canIndent(state(), 5, viewOptions()) === true))
+    var indented = Model.indent(state(), 5, viewOptions())
+    out.push("indentPutsTheRowInTheFolder=" + (Model.stateOf(indented).items[1].items.length === 3
+                                               && Model.stateOf(indented).items[1].items[2].id === "b3"))
+    out.push("theIndentedRowIsOneDeeper=" + (Model.flatten(Model.stateOf(indented)).filter(function (r) { return r.id === "b3" })[0].depth === 1))
+    var outdented = Model.outdent(Model.stateOf(indented), 5, viewOptions())
+    out.push("outdentLiftsItBackOut=" + (Model.stateOf(outdented).items[2].id === "b3"))
+    // One level, not two: the row that was inside Servers comes out beside
+    // Servers, still inside Code. Reading this off the flattened order cannot
+    // tell the two apart, so the parent is what gets checked.
+    var deepOut = Model.outdent(Model.stateOf(movedDown), 3, viewOptions())
+    out.push("aRowTwoFoldersDeepLiftsOneLevel=" + (Model.flatten(Model.stateOf(deepOut))
+      .filter(function (r) { return r.id === "b2" })[0].parentId === "f1"))
+    out.push("outdentRefusesAtTheTop=" + (Model.canOutdent(state(), 1, viewOptions()) === false))
+    out.push("indentRefusesTheFirstRow=" + (Model.canIndent(state(), 0, viewOptions()) === false))
 
-    var edited = Model.updateAt(list, fullRowFor(0), {
-      id: "ignored", type: "cmd", label: "Renamed", target: "true", icon: ""
-    })
-    out.push("editHitTheShownRow=" + (edited[1].label === "Renamed"))
-    // The row keeps the identity the file already gave it, so an edit does not
-    // orphan the row it is editing.
-    out.push("editKeptTheRowsId=" + (edited[1].id === "b"))
-    out.push("editDidNotTouchRow0=" + (edited[0].id === "a" && edited[0].label === "GitHub"))
+    // ---- a folder cannot swallow itself
+    out.push("aFolderCannotBeIndentedIntoItself=" + (Model.indent(state(), 1, viewOptions()).length === 3))
 
-    // Row 0 on screen is "report", which is row 1 in the file, so moving it down
-    // swaps it past its next saved neighbour and not past whatever happened to
-    // be second on screen.
-    var moved = Model.moveBy(list, fullRowFor(0), 1)
-    out.push("moveSwappedWithItsNeighbour=" + (moved[0].id === "a" && moved[1].id === "c"
-                                               && moved[2].id === "b" && moved[3].id === "d"))
+    // ---- pinned
+    pinnedOnly = true
+    out.push("pinnedShowsOneRow=" + (ids().join(",") === "b3"))
+    out.push("pinnedSavesEverything=" + (allEntries.length === 3))
+    pinnedOnly = false
+    out.push("pinnedIsAViewNotASort=" + (ids().join(",") === "s1,f1,b1,f2,b2,b3"))
+    var pinned = Model.stateOf(Model.togglePinned(state(), 2, viewOptions()))
+    out.push("pinningDoesNotReorder=" + (Model.flatten(pinned).map(function (r) { return r.id }).join(",") === "s1,f1,b1,f2,b2,b3"))
+    allEntries = pinned
+    pinnedOnly = true
+    // The folder comes along as the way to the pin, not as a pin of its own:
+    // the same rule the search box follows, so a row's ancestors are never
+    // dropped out from under it.
+    out.push("theNewPinShowsUp=" + (ids().join(",") === "f1,b1,b3"))
+    out.push("aFolderIsNotItselfAPin=" + (ids().indexOf("f2") < 0))
+    pinnedOnly = false
 
-    // Adding under a query: the new row may not be visible at all, and that must
-    // not be mistaken for a failure to add.
-    // Neither word below contains the letter the query is looking for, so the
-    // new row is genuinely saved and genuinely not on screen.
-    var added = Model.append(list, { type: "cmd", label: "zzz", target: "pwd", icon: "" })
-    out.push("addStillSaved=" + (added.length === 5))
-    var afterAdd = Model.filterEntries({ version: 1, bookmarks: added }, "e")
-    out.push("addHiddenByItsOwnQuery=" + (afterAdd.length === 3))
-    out.push("addIsNotInTheView=" + (afterAdd.filter(function (e) { return e.id === added[4].id }).length === 0))
+    // ---- the file
+    out.push("aTreeRoundTripsExactly=" + (Model.serialize(state()) === Model.serialize(Model.parse(Model.serialize(state())))))
 
-    out.push("emptyQueryMatchesEverythingAgain=" + (Model.filterEntries({ version: 1, bookmarks: added }, "").length === 5))
-
-    console.log("FILTER " + out.join(" "))
+    console.log("TREE " + out.join(" "))
     Qt.callLater(Qt.quit)
   }
 }
 QML
 
 out="$(run_scene)"
-results="$(printf '%s' "$out" | sed -n 's/.*FILTER //p')"
+results="$(printf '%s' "$out" | sed -n 's/.*TREE //p')"
 if [[ -z "$results" ]]; then
-  bad "the filter harness reported nothing"
+  bad "the tree harness reported nothing"
   printf '%s\n' "$out" | grep -vE "$noise" | tail -8
 else
   for pair in $results; do
@@ -1199,161 +1596,22 @@ else
   done
 fi
 
-# A picked path and a typed one are the same field, and the pickers must not
-# appear for types that have nothing to pick.
-#
-# The form's own fields are unreachable from out here — a QML `id` is not a
-# property, so form.targetField does not exist. Everything is therefore driven
-# the way the harness above drives it: seed through openFor(), act through the
-# root's own functions, and read the answer off the submitted signal. The picker
-# buttons are the one thing that must be found by walking, because `text` is a
-# real property and their visibility is the thing under test.
-cat > "$WORK/shell.qml" <<'QML'
-import QtQuick
-import "components" as C
-
-Item {
-  id: harness
-  width: 340
-  height: 600
-
-  property int submittedCount: 0
-  property string lastPayload: ""
-  property bool lastCancelled: false
-
-  function byText(want) {
-    var found = null
-    function walk(item) {
-      if (item.text === want) found = item
-      for (var i = 0; i < item.children.length; i++) walk(item.children[i])
-    }
-    walk(m)
-    return found
-  }
-
-  C.AddBookmarkModal {
-    id: m
-    anchors.fill: parent
-    onSubmitted: function(index, payloadJson) {
-      harness.submittedCount++
-      harness.lastPayload = payloadJson
-    }
-    onCancelled: harness.lastCancelled = true
-  }
-
-  // A submitted payload, or "" when the form refused to submit.
-  function save(entry) {
-    harness.submittedCount = 0
-    m.openFor(-1, entry)
-    m.submit()
-    return harness.submittedCount === 1 ? JSON.parse(harness.lastPayload) : null
-  }
-
-  Component.onCompleted: {
-    var out = []
-    var file = { type: "file", label: "", icon: "" }
-
-    var fileBtn = byText("File\u2026")
-    var folderBtn = byText("Folder\u2026")
-    out.push("pickersExist=" + (fileBtn !== null && folderBtn !== null))
-
-    m.openFor(-1, { type: "file", label: "", target: "", icon: "" })
-    out.push("browsersShowForFile=" + (fileBtn.visible && folderBtn.visible))
-
-    m.openFor(-1, { type: "url", label: "", target: "", icon: "" })
-    out.push("browsersHideForUrl=" + (!fileBtn.visible && !folderBtn.visible))
-
-    m.openFor(-1, { type: "cmd", label: "", target: "", icon: "" })
-    out.push("browsersHideForCmd=" + (!fileBtn.visible && !folderBtn.visible))
-
-    // What a picker does: hand a path to the form, which then owns it. The
-    // field stays editable, so the saved value is the path, not a reference to
-    // whatever the dialog last had open.
-    m.openFor(-1, { type: "file", label: "", target: "", icon: "" })
-    m.acceptPath("/tmp/My Notes/a.md")
-    out.push("pickedPathAccepted=" + (save({ type: "file", target: "/tmp/My Notes/a.md" }) !== null))
-
-    // A path with a space in it is the whole reason this type exists, and the
-    // label is the basename rather than the word before the space.
-    var picked = save({ type: "file", target: "/tmp/My Notes/quarterly report.md" })
-    out.push("pathWithSpacesSaved=" + (picked !== null && picked.target === "/tmp/My Notes/quarterly report.md"))
-    out.push("labelIsBasename=" + (picked !== null && picked.label === "quarterly report.md"))
-
-    // A directory is the same call and the same kind of bookmark.
-    out.push("directorySaved=" + (save({ type: "file", target: "/home/bo/code" }) !== null))
-    out.push("tildeSavedUnexpanded=" + (save({ type: "file", target: "~/notes.md" }).target === "~/notes.md"))
-
-    // Refused, and the form says which rule it broke.
-    out.push("relativeRefused=" + (save({ type: "file", target: "notes.md" }) === null))
-    out.push("emptyRefused=" + (save({ type: "file", target: "  " }) === null))
-    // A URL is not a path, whatever the user meant by it.
-    out.push("urlNotAFile=" + (save({ type: "file", target: "https://x.example" }) === null))
-
-    console.log("PICKER " + out.join(" "))
-    Qt.callLater(Qt.quit)
-  }
-}
-QML
-
-out="$(run_scene)"
-results="$(printf '%s' "$out" | sed -n 's/.*PICKER //p')"
-if [[ -z "$results" ]]; then
-  bad "the picker harness reported nothing"
-  printf '%s\n' "$out" | grep -vE "$noise" | tail -8
-else
-  for pair in $results; do
-    case "$pair" in
-      *=true)  pass "${pair%%=*}" ;;
-      *=false) bad "${pair%%=*}" ;;
-      *)       bad "unreadable result: $pair" ;;
-    esac
-  done
-fi
-
-
-
-# "Opening one sheet closes the other" is the panel's policy, not a property of
-# either sheet, and the harness above cannot reach it: calling modal.openFor()
-# directly skips root.openModal(), which is where the policy lives, and the
-# panel's own root cannot be instantiated offscreen because it owns a
-# PanelWindow. So the policy is checked where it is written. Asserting the
-# behaviour here instead would mean asserting that openFor() closes a sheet it
-# has never heard of.
-for pair in "openModal:settings.close()" "openSettings:modal.close()"; do
-  fn="${pair%%:*}"; call="${pair##*:}"
-  body="$(sed -n "/function ${fn}(/,/^  }$/p" "$REPO_DIR"/src/Sidebar.qml)"
-  if grep -q "${call%%(*}" <<<"$body"; then
-    pass "$fn closes the other sheet"
+# The harness above is a copy of the panel's mechanics, so it is only worth
+# anything while the panel still has those mechanics. A test that quietly keeps
+# checking a mechanism the panel no longer uses is worse than no test: it goes
+# green while the thing it names is gone.
+for fn in viewOptions bookmarkState toggleFolder indentEntry outdentEntry togglePin activateRow; do
+  if grep -q "function $fn(" "$REPO_DIR/src/Sidebar.qml"; then
+    pass "the panel still defines $fn"
   else
-    bad "$fn does not close the other sheet"
+    bad "the panel no longer defines $fn, so the harness above is fiction"
   fi
 done
-
-# The panel must consult one flag before acting on the list, and both sheets
-# have to be part of it — a check that only looked at the bookmark form would
-# pass while Enter still launched things through the settings sheet.
-sidebar="$REPO_DIR"/src/Sidebar.qml
-if grep -q "overlayOpen: modal.opened || settings.opened" "$sidebar"; then
-  pass "one flag says a sheet owns the surface"
+if grep -q "function fullRowFor(" "$REPO_DIR/src/Sidebar.qml"; then
+  bad "the panel still maps rows through fullRowFor, and the harness does not"
 else
-  bad "there is no single overlay flag covering both sheets"
+  pass "the panel addresses rows through the view options, as the harness does"
 fi
-for guard in "onMoveRequested: function(dx, dy) {" "onDeleteRequested: function() {"; do
-  body="$(sed -n "/$guard/,/^        }$/p" "$sidebar")"
-  grep -q "overlayOpen" <<<"$body" || bad "a list action does not check the overlay flag"
-done
-grep -q "if (settings.opened) return" "$sidebar" \
-  && pass "Enter with the settings open does not reach the list" \
-  || bad "Enter can still reach the list through the settings sheet"
-grep -q "onCloseRequested: modal.opened ?" "$sidebar" && grep -q "settings.cancel()" "$sidebar" \
-  && pass "Escape closes the sheet that is open" \
-  || bad "Escape does not know about the settings sheet"
-
-# The width rule has to hold for the new card too, not just the bookmark form.
-card_w="$(sed -n 's/.*width: Math\.min(Style\.space(\([0-9]*\)), parent\.width.*/\1/p' \
-          "$REPO_DIR"/src/components/SettingsModal.qml | head -1)"
-[[ -n "$card_w" ]] && pass "the settings card is clamped to the panel" \
-                  || bad "the settings card sets a literal width with no parent clamp"
 
 head_ "the icon lookup cannot become a shell command"
 canary="$WORK/canary"
@@ -1390,6 +1648,45 @@ elif grep -q 'WlrKeyboardFocus.OnDemand' "$REPO_DIR/src/Sidebar.qml" \
   pass "the panel asks for focus instead of taking it (OnDemand, Exclusive only for forms)"
 else
   bad "the panel's keyboard focus mode is not the expected one"
+fi
+
+head_ "the example file is one this plugin would write"
+# install.sh seeds a first run from bookmarks.example.json, so this file is not
+# documentation: it is the data a new machine starts with. It therefore has to
+# pass the same checks as a user's own file, and it has to be in exactly the
+# shape a save produces — otherwise the very first edit rewrites every line of
+# it, which is the sort of diff that teaches people not to read their config.
+example="$REPO_DIR/bookmarks.example.json"
+if [[ ! -f "$example" ]]; then
+  bad "there is no bookmarks.example.json to seed a new install from"
+else
+  if node -e '
+    const fs = require("fs")
+    const src = fs.readFileSync(process.argv[1], "utf8")
+    const M = new Function(src + "\nreturn {parse,serialize,looksLikeOurFile,flatten};")()
+    const text = fs.readFileSync(process.argv[2], "utf8")
+    if (!M.looksLikeOurFile(text)) { console.log("not our file"); process.exit(1) }
+    if (M.serialize(M.parse(text)) !== text) { console.log("not canonical"); process.exit(1) }
+    const rows = M.flatten(M.parse(text), {})
+    const kinds = new Set(rows.map((r) => r.kind))
+    for (const want of ["bookmark", "folder", "section", "separator"]) {
+      if (!kinds.has(want)) { console.log("no " + want); process.exit(1) }
+    }
+    if (!rows.some((r) => r.pinned)) { console.log("nothing pinned"); process.exit(1) }
+    if (!rows.some((r) => r.depth > 0)) { console.log("nothing nested"); process.exit(1) }
+  ' "$REPO_DIR/src/BookmarkModel.js" "$example"; then
+    pass "the seeded file is readable, canonical, and shows every kind"
+  else
+    bad "bookmarks.example.json would not survive a first save unchanged"
+  fi
+  # Every id has to be unique across the whole tree, or a hand-edited duplicate
+  # makes one row address two nodes and the panel edits whichever it finds.
+  ids_in_example="$(grep -oE '"id": "[^"]+"' "$example" | sort | uniq -d)"
+  if [[ -z "$ids_in_example" ]]; then
+    pass "no id in the seeded file is used twice"
+  else
+    bad "the seeded file repeats an id:$ids_in_example"
+  fi
 fi
 
 head_ "the data model"
